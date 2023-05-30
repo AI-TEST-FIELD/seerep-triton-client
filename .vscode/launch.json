@@ -1,0 +1,23 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Infer",
+            "type": "python",
+            "request": "launch",
+            "program": "./main.py",
+            "args": [
+                "-cT", "10.249.6.23:8001",
+                "-cS", "agrigaia-ur.ni.dfki:9090",
+                "-p", "aitf-triton-data",
+                // "-m", "dino_512",
+                "-m", "YOLOv5nCOCO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
