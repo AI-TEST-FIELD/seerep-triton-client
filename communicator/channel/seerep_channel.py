@@ -412,12 +412,12 @@ class SEEREPChannel():
                 else:
                     scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
                     sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, anns[label], confidence])
-                    # For DEBUG
-                tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
-            #     cv2.rectangle(tmp, 
-            #                     (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
-            #                     (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
-            #                     (255, 0, 0), 2)
+                # For DEBUG
+                # tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
+                # cv2.rectangle(tmp, 
+                #                 (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
+                #                 (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
+                #                 (255, 0, 0), 2)
             # cv2.imshow('image number {}'.format(j+1), tmp)
             # cv2.waitKey(0)
             data.append(sample)

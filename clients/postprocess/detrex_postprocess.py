@@ -17,9 +17,9 @@ class Detrexpostprocess(Postprocess):
 
     def load_class_names(self, dataset='COCO'):
         if dataset=='COCO':
-            namesfile = './data/coco.names'
+            namesfile = './config/coco.names'
         elif dataset=='CROP':
-            namesfile='./data/crop.names'
+            namesfile='./config/crop.names'
         else:
             print('[ERROR] No valid dataset was provided. Exiting!')
             sys.exit(0)

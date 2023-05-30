@@ -13,8 +13,9 @@
                 "-cT", "10.249.6.23:8001",
                 "-cS", "agrigaia-ur.ni.dfki:9090",
                 "-p", "aitf-triton-data",
-                // "-m", "dino_512",
-                "-m", "YOLOv5nCOCO"
+                // "-m", "dino_coco_512",
+                "-m", "dino_coco_512_squared",
+                // "-m", "YOLOv5nCOCO"
             ],
             "console": "integratedTerminal",
             "justMyCode": true

@@ -1,5 +1,5 @@
 from .base_client import Client
-from .preprocess import FCOSpreprocess
+from .preprocess import Detrexpreprocess
 from .postprocess import Detrexpostprocess
 class Detrex_client(Client):
     """
@@ -16,7 +16,7 @@ class Detrex_client(Client):
         self._clients[clienttype] = client
 
     def get_preprocess(self):
-        return FCOSpreprocess()
+        return Detrexpreprocess()
 
     def get_postprocess(self):
         return Detrexpostprocess()
