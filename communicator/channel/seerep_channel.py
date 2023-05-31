@@ -10,6 +10,7 @@ import os
 import sys
 import cv2
 import numpy as np
+import logging
 
 import flatbuffers
 import grpc
@@ -21,13 +22,13 @@ from seerep.fb import meta_operations_grpc_fb as metaOperations
 import communicator.channel.util_fb as util_fb
 
 import uuid
-
+logger = logging.getLogger("SEEREP-Client")
 
 class SEEREPChannel():
     """
     A SEEREPChannel is establishes a connection between the triton client and SEEREP.
     """
-    def __init__(self, project_name='testproject', socket='agrigaia-ur.ni.dfki:9090'):
+    def __init__(self, project_name='testproject', socket='agrigaia-ur.ni.dfki:9090', visualize=False):
         self._meta_data = {}
         self._grpc_stub = None
         self._grpc_stubmeta = None
@@ -40,6 +41,7 @@ class SEEREPChannel():
 
         # register and initialise the stub
         self.channel = self.make_channel(secure=False)
+        self.vis = visualize
         self.register_channel()
         #self._grpc_metadata() #
 
@@ -148,18 +150,18 @@ class SEEREPChannel():
             if log==True:
                 try:
                     tmp = response.Projects(i).Name().decode("utf-8")
-                    print(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
+                    logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
                     if response.Projects(i).Name().decode("utf-8") == projname:
                         projectuuid = response.Projects(i).Uuid().decode("utf-8")
                         curr_proj = tmp
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
             else:
                 try:
                     projectuuid = response.Projects(i).Uuid().decode("utf-8")
                 except Exception as e:
-                    print(e)
-        print("[FOUND PROJECT] {} with UUID: {}".format(curr_proj, projectuuid))
+                    logger.error(e)
+        logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
         return projectuuid
 
     def string_to_fbmsg (self, projectuuid):
@@ -319,14 +321,14 @@ class SEEREPChannel():
             nbbs = response.LabelsBbLength()
             sample['boxes'] = nbbs
             for category in range(response.LabelsBbLength()):
-                print("Category name: {}".format(response.LabelsBb(category).Category().decode("utf-8")))
+                logger.info("Category name: {}".format(response.LabelsBb(category).Category().decode("utf-8")))
                 for x in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
-                    print(f"uuidmsg: {response.Header().UuidMsgs().decode('utf-8')}")
-                    print("first label: " + response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Label().decode("utf-8") 
+                    logger.info(f"uuidmsg: {response.Header().UuidMsgs().decode('utf-8')}")
+                    logger.info("first label: " + response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Label().decode("utf-8") 
                         + " ; confidence: " 
                         + str(response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Confidence())
                         )
-                    print(
+                    logger.info(
                         "bounding box number (Xcenter,Ycenter,Xextent,Yextent):"
                         + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().CenterPoint().X())
                         + " "
@@ -350,7 +352,6 @@ class SEEREPChannel():
         self._builder.PrependUOffsetTRelative(projectuuidString)
         projectuuidMsg = self._builder.EndVector()
         projectUuids = [projectuuidString]
-        # labels = [[self._builder.CreateString("person")]]
         categories = ['ground_truth']
         labels = [[util_fb.createLabelWithConfidence(self._builder, "person"), 
                 #    util_fb.createLabelWithConfidence(self._builder, "weather_general_sun"),
@@ -362,13 +363,6 @@ class SEEREPChannel():
         #           [util_fb.createLabelWithConfidence(self._builder, "maize"), 
         #            util_fb.createLabelWithConfidence(self._builder, "weeds")]]
         labelCategory = util_fb.createLabelWithCategory(self._builder, categories, labels)
-        # Query.Start(self._builder)
-        # Query.AddProjectuuid(self._builder, projectuuidMsg)
-        # # Query.AddWithoutdata
-        # for key, value in kwargs.items():
-        #     if key == "bb": Query.AddBoundingbox(self._builder, value)
-        #     if key == "ti": Query.AddTimeinterval(self._builder, value)
-        # queryMsg = Query.End(self._builder)
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
@@ -386,9 +380,8 @@ class SEEREPChannel():
         data = []
         sample = {}
         category = 1 # ground_truth
-        # print("Category name: {}".format(response.LabelsBb(category).Category().decode("utf-8")))
         for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
-            # print('[INFO] Receiving images . . .')
+            logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
             sample['uuid'] = self._msguuid
@@ -413,16 +406,19 @@ class SEEREPChannel():
                     scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
                     sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, anns[label], confidence])
                 # For DEBUG
-                # tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
-                # cv2.rectangle(tmp, 
-                #                 (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
-                #                 (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
-                #                 (255, 0, 0), 2)
-            # cv2.imshow('image number {}'.format(j+1), tmp)
-            # cv2.waitKey(0)
+                if self.vis:
+                    tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
+                    cv2.rectangle(tmp, 
+                                    (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
+                                    (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
+                                    (255, 0, 0), 2)
+            if self.vis:
+                cv2.imshow('image number {}'.format(j+1), tmp)
+                cv2.waitKey(0)
+                cv2.destroyWindow('image number {}'.format(j+1))
             data.append(sample)
             sample={}
-        print('[INFO] Fetched {} images from the current SEEREP project'.format(len(data)))
+        logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))
         return data
     
     def sendboundingbox(self, sample, bbs, labels, confidences, model_name):
@@ -467,7 +463,7 @@ class SEEREPChannel():
         try:
             ret = send_channel.AddBoundingBoxes2dLabeled( iter(msg) )
         except Exception as e:
-            print(e)   
+            logger.error(e)   
 
 
     '''
