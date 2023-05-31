@@ -58,7 +58,7 @@ def parse_args():
                         type=str,
                         required=False,
                         default='error',
-                        choices=['info', 'warning', 'error'],
+                        choices=['info', 'warning', 'debug', "critical", "error"],
                         help='Set logging level')
     parser.add_argument('-b',
                         '--batch-size',
@@ -71,6 +71,11 @@ def parse_args():
                         action='store_true',
                         required=False,
                         help='Visualize images')
+    parser.add_argument('-s',
+                        '--semantics',
+                        nargs='+',
+                        required=False,
+                        help='Provide SEEREP semantics as a list e.g. "-s person weather_general_cloudy "')
     return parser.parse_args()
 
 
