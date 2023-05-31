@@ -83,7 +83,7 @@ class SEEREPChannel():
         grpc_stub  = imageService.ImageServiceStub(self.channel)
         grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)  
         builder = self.init_builder()
-        projectid = self.retrieve_project(self.projname, log=False)
+        projectid = self._projectid
 
         return (grpc_stub, grpc_stubmeta, builder, projectid)
 
@@ -343,7 +343,7 @@ class SEEREPChannel():
             sample={}
         return data
 
-    def run_query_aitf(self, **kwargs):
+    def run_query_aitf(self, *args):
         # anns = {'weeds':0, 
         #         'maize':1}
         anns = {'person':0}
@@ -353,15 +353,12 @@ class SEEREPChannel():
         projectuuidMsg = self._builder.EndVector()
         projectUuids = [projectuuidString]
         categories = ['ground_truth']
-        labels = [[util_fb.createLabelWithConfidence(self._builder, "person"), 
-                #    util_fb.createLabelWithConfidence(self._builder, "weather_general_sun"),
-                #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_cloudy"),
-                #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_rain"),
-                 ]]
-        # labels = [[util_fb.createLabelWithConfidence(self._builder, "maize"), 
-        #            util_fb.createLabelWithConfidence(self._builder, "weeds")],
-        #           [util_fb.createLabelWithConfidence(self._builder, "maize"), 
-        #            util_fb.createLabelWithConfidence(self._builder, "weeds")]]
+        # labels = [[util_fb.createLabelWithConfidence(self._builder, "person"), 
+        #         #    util_fb.createLabelWithConfidence(self._builder, "weather_general_sun"),
+        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_cloudy"),
+        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_rain"),
+        #          ]]
+        labels = [[util_fb.createLabelWithConfidence(self._builder, semantic) for semantic in args[0]]]
         labelCategory = util_fb.createLabelWithCategory(self._builder, categories, labels)
         queryMsg = util_fb.createQuery(
             self._builder,
