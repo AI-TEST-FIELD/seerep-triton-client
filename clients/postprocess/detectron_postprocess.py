@@ -17,9 +17,9 @@ class FCOSpostprocess(Postprocess):
 
     def load_class_names(self, dataset='COCO'):
         if dataset=='COCO':
-            namesfile = './data/coco.names'
+            namesfile = './config/coco.names'
         elif dataset=='CROP':
-            namesfile='./data/crop.names'
+            namesfile='./config/crop.names'
         else:
             print('[ERROR] No valid dataset was provided. Exiting!')
             sys.exit(0)
@@ -39,8 +39,11 @@ class FCOSpostprocess(Postprocess):
             """
         boxes = self.deserialize_bytes_float(prediction.raw_output_contents[0])
         boxes = np.reshape(boxes, prediction.outputs[0].shape)
-        class_ids = self.deserialize_bytes_int(prediction.raw_output_contents[1])
+        shape = self.deserialize_bytes_int(prediction.raw_output_contents[1])
+        shape = np.reshape(shape, prediction.outputs[1].shape)
         scores = self.deserialize_bytes_float(prediction.raw_output_contents[2])
         scores = np.reshape(scores, prediction.outputs[2].shape)
-
+        class_ids = self.deserialize_bytes_int(prediction.raw_output_contents[3])
+        class_ids = np.reshape(class_ids, prediction.outputs[3].shape)
+        
         return [boxes, class_ids, scores]
