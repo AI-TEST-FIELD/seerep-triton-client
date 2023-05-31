@@ -52,7 +52,8 @@ class EvaluateInference(BaseInference):
         log_level = {
             'info': logging.INFO,
             'warning': logging.WARNING,
-            'verbose':logging.DEBUG
+            'debug':logging.DEBUG,
+            'critical':logging.CRITICAL,
         }
         logging.basicConfig(level=log_level[args.log_level])
         self.viz = args.visualize
@@ -64,17 +65,6 @@ class EvaluateInference(BaseInference):
         self.bag_processed = False
         self.gt_processed = False
         self.img_processed = False
-
-        # rospy.loginfo('Starting Prometheus Server on Port 7658')
-        # # a server which sends our metrics to the port 7658
-        # self.prometheus_server = start_http_server(7658)
-
-        # # sending metrics via prometheus client
-        # self.p_summary = Summary('precision', 'Precision of the Model')
-        # self.r_summary = Summary('recall', 'Recall of the Model')
-        # self.ap_summary = Summary('ap', 'Average Precision of the Model')
-        # self.f1_summary = Summary('fone', 'F1 Metric of the Model')
-        # self.ap_class_summary = Summary('ap_class', 'Average Precision per Class of the Model')
 
     def _register_inference(self):
         """
@@ -161,7 +151,7 @@ class EvaluateInference(BaseInference):
                                             # socket='localhost:9090')
 
         # data = schan.run_query()
-        data = schan.run_query_aitf()
+        data = schan.run_query_aitf(self.args.semantics)
         color1 = (255, 0, 0)
         color2 = (0, 255, 0)
         text_color = (255, 255, 255)
