@@ -19,6 +19,10 @@
                 // "-m", "dino_coco_512_squared",
                 "-m", "YOLOv5nCOCO",
                 // "-m", "fcos_coco",
+                "-s","person", 
+                // "weatherGeneral_cloudy", 
+                // "weather_general_sun", 
+                "weatherGeneral_rain"
             ],
             "console": "integratedTerminal",
             "justMyCode": true
