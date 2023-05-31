@@ -11,6 +11,7 @@ clients = {
     'YOLOv5nCROP': Yolov5client,
     'YOLOv5nCOCO': Yolov5client,
     'FCOS_detectron':FCOS_client,
+    'fcos_coco':FCOS_client,
     'dino_coco_512_squared':Detrex_client,
     'dino_coco_512':Detrex_client,
     # 'second_iou':Pointpillars_client,
@@ -46,47 +47,41 @@ def parse_args():
                         required=False,
                         default="aitf-triton-data",
                         help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
-    parser.add_argument(
-        '-x',
-        '--model-version',
-        type=str,
-        required=False,
-        default="",
-        help='Version of model. Default is to use latest version.')
+    parser.add_argument('-x',
+                        '--model-version',
+                        type=str,
+                        required=False,
+                        default="",
+                        help='Version of model. Default is to use latest version.')
+    parser.add_argument('-l',
+                        '--log-level',
+                        type=str,
+                        required=False,
+                        default='error',
+                        choices=['info', 'warning', 'error'],
+                        help='Set logging level')
     parser.add_argument('-b',
                         '--batch-size',
                         type=int,
                         required=False,
                         default=1,
                         help='Batch size. Default is 1.')
-    # parser.add_argument(
-    #     '-s',
-    #     '--scaling',
-    #     type=str,
-    #     choices=['NONE', 'INCEPTION', 'VGG', 'COCO'],
-    #     required=False,
-    #     default='COCO',
-    #     help='Type of scaling to apply to image pixels. Default is NONE.')
-    # parser.add_argument(
-    #     '-i',
-    #     '--imagesrc',
-    #     type=str,
-    #     choices=['ros', 'local', 'seerepfb'],
-    #     required=False,
-    #     default='ros',
-    #     help='Source of input images to run inference on. Default is ROS image topic')
+    parser.add_argument('-v',
+                        '--visualize',
+                        action='store_true',
+                        required=False,
+                        help='Visualize images')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     FLAGS = parse_args()
-    # with open('./data/client_parameter.yaml') as file:
-    #     param = yaml.load(file, Loader=yaml.FullLoader)
+    # select client operations based on the model
     client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
-    # client = FCOS_client(model_name='FCOS_detectron')
 
     #define channel
     channel = grpc_channel.GRPCChannel(FLAGS)
+
     #define inference
     evaluation = EvaluateInference(FLAGS, channel, client)
     evaluation.start_inference(FLAGS.model_name)
