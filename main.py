@@ -11,9 +11,7 @@ clients = {
     'YOLOv5nCROP': Yolov5client,
     'YOLOv5nCOCO': Yolov5client,
     'FCOS_detectron':FCOS_client,
-    'fcos_coco':FCOS_client,
-    'dino_coco_512_squared':Detrex_client,
-    'dino_coco_512':Detrex_client,
+    'dino_coco_600_squared':Detrex_client,
     # 'second_iou':Pointpillars_client,
     # more clients can be added
 }

@@ -131,14 +131,14 @@ class EvaluateInference(BaseInference):
             self.channel.response = self.channel.do_inference()  # Inference
             self.prediction = self.client_postprocess.extract_boxes(self.channel.response)
             if len(self.prediction[1]) > 0:
-                if self.viz:
-                    tmp = np.transpose(self.image[0, :, :], (1, 2, 0))
-                    tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
-                    for box in self.prediction[0]:
-                        cv2.rectangle(tmp, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
-                    cv2.imshow('img', tmp)
-                    cv2.waitKey()
-                    cv2.destroyWindow('img')
+                # if self.viz:
+                #     tmp = np.transpose(self.image[0, :, :], (1, 2, 0))
+                #     tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
+                #     for box in self.prediction[0]:
+                #         cv2.rectangle(tmp, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
+                #     cv2.imshow('img', tmp)
+                #     cv2.waitKey()
+                #     cv2.destroyWindow('img')
                 self.prediction[0] = self._scale_box_array(self.prediction[0], normalized=False)
                 return self.prediction
             else:
@@ -152,8 +152,8 @@ class EvaluateInference(BaseInference):
 
         # data = schan.run_query()
         data = schan.run_query_aitf(self.args.semantics)
-        color1 = (255, 0, 0)
-        color2 = (0, 255, 0)
+        color1 = (255, 0, 0)    #red
+        color2 = (0, 255, 0)    #green
         text_color = (255, 255, 255)
         # traverse through the images
         logger.info('Sending inference request to Triton for each image sample')
@@ -174,26 +174,24 @@ class EvaluateInference(BaseInference):
                 bbs.append(((x,y), (w,h)))     # SEEREP expects center x,y and width, height
                 labels.append(label)
                 data[idx]['predictions'].append([start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]])
-                if self.viz:
-                    (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                    cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
-                    cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
-                    cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
+                (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
+                cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
+                cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
                 sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
-            if self.viz:
-                for obj in range(len(pred[0])):
+                for obj in range(len(sample['boxes'])):
                     cv2.rectangle(sample['image'], 
                                     (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])), 
                                     (int(sample['boxes'][obj][0]+sample['boxes'][obj][2]), int(sample['boxes'][obj][1]+sample['boxes'][obj][3])), 
                                     color2, 2)
-                    cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
+                    # cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
             if self.viz:
                 cv2.imshow('image number {}'.format(idx+1), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
                 cv2.waitKey()
                 cv2.destroyWindow('image number {}'.format(idx+1))
             # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
             # TODO run evaluation without inference call
-            schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name)
+            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name)
             logger.info('Sent boxes for image under category name {}'.format(self.model_name))
 
         # Convert groundtruth and predictions to PyCOCO format for evaluation

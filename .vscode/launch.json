@@ -13,16 +13,15 @@
                 "-cT", "10.249.6.23:8001",
                 "-cS", "agrigaia-ur.ni.dfki:9090",
                 "-p", "aitf-triton-data",
-                "-l", "info",
+                "-l", "critical",
                 // "-v",
-                // "-m", "dino_coco_512",
-                // "-m", "dino_coco_512_squared",
-                "-m", "YOLOv5nCOCO",
-                // "-m", "fcos_coco",
-                "-s","person", 
-                // "weatherGeneral_cloudy", 
+                "-m", "dino_coco_600_squared",
+                // "-m", "YOLOv5nCOCO",
+                "-s",
+                "person", 
+                "weatherGeneral_cloudy", 
                 // "weather_general_sun", 
-                "weatherGeneral_rain"
+                // "weatherGeneral_rain"
             ],
             "console": "integratedTerminal",
             "justMyCode": true
