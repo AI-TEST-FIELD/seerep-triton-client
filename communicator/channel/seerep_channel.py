@@ -346,7 +346,8 @@ class SEEREPChannel():
     def run_query_aitf(self, *args):
         # anns = {'weeds':0, 
         #         'maize':1}
-        anns = {'person':0}
+        anns = {'person':0,
+                'fire hydrant':10}
         projectuuidString = self._builder.CreateString(self._projectid)
         Query.StartProjectuuidVector(self._builder, 1)
         self._builder.PrependUOffsetTRelative(projectuuidString)
@@ -410,9 +411,9 @@ class SEEREPChannel():
                                     (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
                                     (255, 0, 0), 2)
             if self.vis:
-                cv2.imshow('image number {}'.format(j+1), tmp)
+                cv2.imshow('image', tmp)
                 cv2.waitKey(0)
-                cv2.destroyWindow('image number {}'.format(j+1))
+                cv2.destroyWindow('image')      
             data.append(sample)
             sample={}
         logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))

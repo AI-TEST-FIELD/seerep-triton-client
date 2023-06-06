@@ -2,7 +2,7 @@
 A client repo to communicate with SEEREP and perform inference with Triton Inference Server
 
 ## Installation
-Tested on Ubuntu 20.04 LTS Python 3.7 
+Tested on Ubuntu 20.04 LTS Python 3.8 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
