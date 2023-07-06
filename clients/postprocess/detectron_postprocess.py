@@ -45,5 +45,6 @@ class FCOSpostprocess(Postprocess):
         scores = np.reshape(scores, prediction.outputs[2].shape)
         class_ids = self.deserialize_bytes_int(prediction.raw_output_contents[3])
         class_ids = np.reshape(class_ids, prediction.outputs[3].shape)
-        
-        return [boxes, class_ids, scores]
+        conf_inds = np.where(scores > 0.40)
+        return [boxes[conf_inds], class_ids[conf_inds], scores[conf_inds]]
+        # return [boxes, class_ids, scores]
