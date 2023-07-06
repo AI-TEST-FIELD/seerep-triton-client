@@ -12,6 +12,7 @@ clients = {
     'YOLOv5nCOCO': Yolov5client,
     'FCOS_detectron':FCOS_client,
     'dino_coco_600_squared':Detrex_client,
+    'retinanet_coco':FCOS_client,
     # 'second_iou':Pointpillars_client,
     # more clients can be added
 }

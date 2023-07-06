@@ -21,5 +21,5 @@ class Yolov5preprocess(Preprocess):
         cv_image = np.expand_dims(cv_image, axis=0)
         cv_image /= 255.0
 
-        return cv_image.astype(np.float32)
+        return cv_image
 

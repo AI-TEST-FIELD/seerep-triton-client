@@ -10,21 +10,33 @@
             "request": "launch",
             "program": "./main.py",
             "args": [
-                "-cT", "10.249.6.23:8001",
-                "-cS", "agrigaia-ur.ni.dfki:9090",
-                "-p", "aitf-triton-data",
-                "-l", "critical",
-                // "-v",
-                "-m", "dino_coco_600_squared",
-                // "-m", "YOLOv5nCOCO",
-                "-s",
+                "--channel-triton", "localhost:8001",
+                "--channel-seerep", "localhost:9090",
+                // "-cT", "10.249.6.23:8001",
+                // "-cS", "agrigaia-ur.ni.dfki:9090",
+                // "--seerep-project", "aitf-triton-coco",
+                "--seerep-project", "aitf-triton-data",
+                "--log-level", "info",
+                "--visualize",
+                // "--model-name", "dino_coco_600_squared",
+                // "--model-name", "YOLOv5nCOCO",
+                "--model-name", "retinanet_coco",
+                "--semantics",
                 "person", 
+                // "Pedestrian",
                 "weatherGeneral_cloudy", 
                 // "weather_general_sun", 
-                // "weatherGeneral_rain"
+                // "weatherGeneral_rain",
+                // "Source_Kitti",
+                // "Source_CoCo",
+                // "occluded",
+                // "truncated",
             ],
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": false,
+            "env": {
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
+            }
         }
     ]
 }
