@@ -1,5 +1,7 @@
 # import time
 import cv2
+import imutils
+import time
 import numpy as np
 # import matplotlib.pyplot as plt
 # import matplotlib.patches as patches
@@ -114,12 +116,30 @@ class EvaluateInference(BaseInference):
         # self.channel.output.name = output_name[0]
         # self.channel.request.outputs.extend([self.channel.output])
 
+    def resize(self, image):
+        # cv_image = cv2.resize(cv_image, (self.channel.input.shape[2], self.channel.input.shape[1]))
+        tmp = image.copy()
+        s_h, s_w = image.shape[0], image.shape[1]
+        n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
+        padded_image = np.zeros((n_h, n_w, 3), dtype=np.uint8)
+        cv_image = imutils.resize(tmp, width=n_w)
+        # padded image
+        padded_image[0:cv_image.shape[0], 0:cv_image.shape[1]] = cv_image
+        # named_window = 'resized'
+        # cv2.imshow(named_window, padded_image)
+        # cv2.waitKey()
+        # cv2.destroyWindow(named_window)
+        return padded_image
+
     def seerep_infer(self, image):
         # convert numpy array to cv2
         cv_image = image
         self.orig_size = cv_image.shape[0:2]
         self.orig_image = cv_image.copy()
-        cv_image = cv2.resize(cv_image, (self.channel.input.shape[1], self.channel.input.shape[2]))
+        s_h, s_w = cv_image.shape[0], cv_image.shape[1]
+        n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
+        cv_image = self.resize(cv_image)
+        tmp = cv_image.copy()
         self.image = self.client_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
         self.image = self.image.astype(self.input_datatypes[self.channel.input.datatype]) 
@@ -132,13 +152,13 @@ class EvaluateInference(BaseInference):
             self.prediction = self.client_postprocess.extract_boxes(self.channel.response)
             if len(self.prediction[1]) > 0:
                 # if self.viz:
-                #     tmp = np.transpose(self.image[0, :, :], (1, 2, 0))
                 #     tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
                 #     for box in self.prediction[0]:
                 #         cv2.rectangle(tmp, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
-                #     cv2.imshow('img', tmp)
+                #     named_window = 'Resized source image with prediction'
+                #     cv2.imshow(named_window, tmp)
                 #     cv2.waitKey()
-                #     cv2.destroyWindow('img')
+                #     cv2.destroyWindow(named_window)
                 self.prediction[0] = self._scale_box_array(self.prediction[0], normalized=False)
                 return self.prediction
             else:
@@ -147,19 +167,28 @@ class EvaluateInference(BaseInference):
     def start_inference(self, model_name):
         schan = seerep_channel.SEEREPChannel(project_name=self.args.seerep_project,
                                             socket=self.args.channel_seerep,
+                                            format='coco',
                                             visualize=self.viz)
                                             # socket='localhost:9090')
 
         # data = schan.run_query()
+        t1 = time.time()
         data = schan.run_query_aitf(self.args.semantics)
+        t2 = time.time()
+        logger.info('Fetching time: {} s'.format(np.round(t2 - t1, 3)))
         color1 = (255, 0, 0)    #red
-        color2 = (0, 255, 0)    #green
+        color2 = (255, 255, 255)    #green
         text_color = (255, 255, 255)
         # traverse through the images
         logger.info('Sending inference request to Triton for each image sample')
+        infer_array = np.zeros(len(data), dtype=np.float16)
         for sample, idx in zip(data, range(len(data))):
             # perform an inference on each image, iteratively
+            t3 = time.time()
             pred = self.seerep_infer(sample['image'])
+            t4 = time.time()
+            infer_array[idx] = t4 - t3
+            # logger.info('Inference time: {}'.format(t4 - t3))
             sample['predictions'] = []
             bbs = []
             labels = []
@@ -179,27 +208,29 @@ class EvaluateInference(BaseInference):
                 cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
                 cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
                 sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
-                for obj in range(len(sample['boxes'])):
-                    cv2.rectangle(sample['image'], 
-                                    (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])), 
-                                    (int(sample['boxes'][obj][0]+sample['boxes'][obj][2]), int(sample['boxes'][obj][1]+sample['boxes'][obj][3])), 
-                                    color2, 2)
+                # for obj in range(       
                     # cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
             if self.viz:
-                cv2.imshow('image number {}'.format(idx+1), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
+                winname = 'Predicted image number {}'.format(idx+1)
+                cv2.namedWindow(winname)  
+                cv2.imshow(winname, cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
+                cv2.moveWindow(winname, 0,0)
                 cv2.waitKey()
-                cv2.destroyWindow('image number {}'.format(idx+1))
+                cv2.destroyWindow(winname)
             # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
             # TODO run evaluation without inference call
-            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name)
+            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
             logger.info('Sent boxes for image under category name {}'.format(self.model_name))
-
         # Convert groundtruth and predictions to PyCOCO format for evaluation
+        logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
+        t5 = time.time()
         coco_data = COCO_SEEREP(seerep_data=data)
         cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
         cocoEval.evaluate()
         cocoEval.accumulate()
         cocoEval.summarize()
+        t6 = time.time()
+        logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
         # self.calculate_metrics()
 
     def compute_ap(self, recall, precision):
@@ -318,10 +349,10 @@ class EvaluateInference(BaseInference):
             xtl, xbr = box[0] * self.orig_size[1], box[2] * self.orig_size[1]
             ytl, ybr = box[1] * self.orig_size[0], box[3] * self.orig_size[0]
         else:
-            xtl, xbr = box[:, 0] * (self.orig_size[1] / self.input_size[0]), \
-                       box[:, 2] * (self.orig_size[1] / self.input_size[0])
-            ytl, ybr = box[:, 1] * self.orig_size[0] / self.input_size[1], \
-                       box[:, 3] * self.orig_size[0] / self.input_size[1]
+            xtl, xbr = box[:, 0] * (self.orig_size[1] / self.input_size[1]), \
+                       box[:, 2] * (self.orig_size[1] / self.input_size[1])
+            ytl, ybr = box[:, 1] * self.orig_size[0] / self.input_size[0], \
+                       box[:, 3] * self.orig_size[0] / self.input_size[0]
         xtl = np.reshape(xtl, (len(xtl), 1))
         xbr = np.reshape(xbr, (len(xbr), 1))
 
