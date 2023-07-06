@@ -28,7 +28,12 @@ class SEEREPChannel():
     """
     A SEEREPChannel is establishes a connection between the triton client and SEEREP.
     """
-    def __init__(self, project_name='testproject', socket='agrigaia-ur.ni.dfki:9090', visualize=False):
+    def __init__(self, 
+                 project_name='testproject', 
+                 socket='agrigaia-ur.ni.dfki:9090', 
+                 format='coco',
+                 visualize=False):
+        
         self._meta_data = {}
         self._grpc_stub = None
         self._grpc_stubmeta = None
@@ -43,6 +48,8 @@ class SEEREPChannel():
         self.channel = self.make_channel(secure=False)
         self.vis = visualize
         self.register_channel()
+        self.ann_dict = self.annotation_dict(format=format)
+
         #self._grpc_metadata() #
 
     def make_channel (self, secure=False):
@@ -342,12 +349,28 @@ class SEEREPChannel():
             data.append(sample)
             sample={}
         return data
+    
+    def annotation_dict(self, format='coco'):
+        anns_dict = {}
+        class_names= []
+        if format == 'coco':
+            filepath = 'config/coco.names'
+        elif format == 'kitti':
+            filepath = 'config/kitti.names'
+        elif format == 'crop':
+            filepath = 'config/crop.names'
+        with open(filepath, 'r') as fp:
+            lines = fp.readlines()
+        for line in lines:
+            line = line.rstrip()
+            class_names.append(line)
+        for id,idx in zip(class_names, range(len(class_names))):
+            anns_dict[id] = idx+1
+
+        return anns_dict
+
 
     def run_query_aitf(self, *args):
-        # anns = {'weeds':0, 
-        #         'maize':1}
-        anns = {'person':0,
-                'fire hydrant':10}
         projectuuidString = self._builder.CreateString(self._projectid)
         Query.StartProjectuuidVector(self._builder, 1)
         self._builder.PrependUOffsetTRelative(projectuuidString)
@@ -399,10 +422,10 @@ class SEEREPChannel():
                     sample['normalized'] = False
                     self.normalized_coors = False 
                 if sample['normalized'] == False:
-                    sample['boxes'].append([x_tl, y_tl, w, h, anns[label], confidence])
+                    sample['boxes'].append([x_tl, y_tl, w, h, self.ann_dict[label], confidence])
                 else:
                     scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
-                    sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, anns[label], confidence])
+                    sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
                 # For DEBUG
                 if self.vis:
                     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
@@ -410,10 +433,13 @@ class SEEREPChannel():
                                     (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
                                     (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
                                     (255, 0, 0), 2)
-            if self.vis:
-                cv2.imshow('image', tmp)
-                cv2.waitKey(0)
-                cv2.destroyWindow('image')      
+            # if self.vis:
+            #     winname = 'image'
+            #     cv2.namedWindow(winname)
+            #     cv2.imshow(winname, tmp)
+            #     cv2.moveWindow(winname, 3000,200)
+            #     cv2.waitKey(0)
+            #     cv2.destroyWindow(winname)    
             data.append(sample)
             sample={}
         logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))
