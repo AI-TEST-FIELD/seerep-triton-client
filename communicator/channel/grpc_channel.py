@@ -24,9 +24,9 @@ class GRPCChannel(BaseChannel):
         """
          register grpc triton channel
         """
-        grpc_channel =  grpc.insecure_channel(self.args.channel_triton ,options=[
-                                   ('grpc.max_send_message_length', self.FLAGS.batch_size*8568044),
-                                   ('grpc.max_receive_message_length', self.FLAGS.batch_size*8568044),
+        grpc_channel =  grpc.insecure_channel(self.args['channel_triton'] ,options=[
+                                   ('grpc.max_send_message_length', self.FLAGS['batch_size']*8568044),
+                                   ('grpc.max_receive_message_length', self.FLAGS['batch_size']*8568044),
                                     ])
         self._grpc_stub  = service_pb2_grpc.GRPCInferenceServiceStub(grpc_channel)
 
@@ -43,11 +43,11 @@ class GRPCChannel(BaseChannel):
         # Make sure the model matches our requirements, and get some
         # properties of the model that we need for preprocessing
         self._meta_data["metadata_request"] = service_pb2.ModelMetadataRequest(
-            name=self.FLAGS.model_name, version=self.FLAGS.model_version)
+            name=self.FLAGS['model_name'], version=self.FLAGS['model_version'])
         self._meta_data["metadata_response"] = self._grpc_stub.ModelMetadata(self._meta_data["metadata_request"])
 
-        self._meta_data["config_request"] = service_pb2.ModelConfigRequest(name=self.FLAGS.model_name,
-                                                                           version=self.FLAGS.model_version)
+        self._meta_data["config_request"] = service_pb2.ModelConfigRequest(name=self.FLAGS['model_name'],
+                                                                           version=self.FLAGS['model_version'])
         self._meta_data["config_response"] = self._grpc_stub.ModelConfig(self._meta_data["config_request"])
 
         # set
@@ -66,8 +66,8 @@ class GRPCChannel(BaseChannel):
         """
         self.input = service_pb2.ModelInferRequest().InferInputTensor()
         self.request = service_pb2.ModelInferRequest()
-        self.request.model_name = self.FLAGS.model_name
-        self.request.model_version = self.FLAGS.model_version
+        self.request.model_name = self.FLAGS['model_name']
+        self.request.model_version = self.FLAGS['model_version']
         self.output = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
 
     def do_inference(self):

@@ -55,8 +55,8 @@ class EvaluateInference(BaseInference):
             'debug':logging.DEBUG,
             'critical':logging.CRITICAL,
         }
-        logging.basicConfig(level=log_level[args.log_level])
-        self.viz = args.visualize
+        logging.basicConfig(level=log_level[args['log_level']])
+        self.viz = args['visualize']
         self.count  = 0
         self.id_list_preds = []
         self.id_list_gts = []
@@ -145,13 +145,13 @@ class EvaluateInference(BaseInference):
                 return self.prediction
             
     def start_inference(self, model_name):
-        schan = seerep_channel.SEEREPChannel(project_name=self.args.seerep_project,
-                                            socket=self.args.channel_seerep,
+        schan = seerep_channel.SEEREPChannel(project_name=self.args['seerep_project'],
+                                            socket=self.args['channel_seerep'],
                                             visualize=self.viz)
                                             # socket='localhost:9090')
 
         # data = schan.run_query()
-        data = schan.run_query_aitf(self.args.semantics)
+        data = schan.run_query_aitf(self.args['semantics'])
         color1 = (255, 0, 0)    #red
         color2 = (0, 255, 0)    #green
         text_color = (255, 255, 255)
