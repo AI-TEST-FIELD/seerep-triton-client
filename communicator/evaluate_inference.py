@@ -129,7 +129,7 @@ class EvaluateInference(BaseInference):
         # cv2.imshow(named_window, padded_image)
         # cv2.waitKey()
         # cv2.destroyWindow(named_window)
-        return padded_image
+        return padded_image, cv_image.shape[0], cv_image.shape[1]
 
     def seerep_infer(self, image):
         # convert numpy array to cv2
@@ -138,7 +138,7 @@ class EvaluateInference(BaseInference):
         self.orig_image = cv_image.copy()
         s_h, s_w = cv_image.shape[0], cv_image.shape[1]
         n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
-        cv_image = self.resize(cv_image)
+        cv_image, r_h, r_w = self.resize(cv_image)
         tmp = cv_image.copy()
         self.image = self.client_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
@@ -159,7 +159,9 @@ class EvaluateInference(BaseInference):
                 #     cv2.imshow(named_window, tmp)
                 #     cv2.waitKey()
                 #     cv2.destroyWindow(named_window)
-                self.prediction[0] = self._scale_box_array(self.prediction[0], normalized=False)
+                self.prediction[0] = self._scale_box_array(self.prediction[0],  
+                                                           source_dim=(r_h, r_w),
+                                                           padded=True)
                 return self.prediction
             else:
                 return self.prediction
@@ -339,15 +341,20 @@ class EvaluateInference(BaseInference):
 
         return [xtl, ytl, xbr, ybr]
 
-    def _scale_box_array(self, box, normalized=False):
+    def _scale_box_array(self, box, source_dim=(512,512), padded=False):
         '''
         box: Bounding box generated for the image size (e.g. 512 x 512) expected by the model at triton server
         return: Scaled bounding box according to the input image from the ros topic.
         '''
-        if normalized:
-            # TODO make it dynamic with mc.Modelshape according to CHW or HWC
-            xtl, xbr = box[0] * self.orig_size[1], box[2] * self.orig_size[1]
-            ytl, ybr = box[1] * self.orig_size[0], box[3] * self.orig_size[0]
+        # if normalized:
+        #     # TODO make it dynamic with mc.Modelshape according to CHW or HWC
+        #     xtl, xbr = box[0] * self.orig_size[1], box[2] * self.orig_size[1]
+        #     ytl, ybr = box[1] * self.orig_size[0], box[3] * self.orig_size[0]
+        if padded:
+            xtl, xbr = box[:, 0] * (self.orig_size[1] / source_dim[1]), \
+                       box[:, 2] * (self.orig_size[1] / source_dim[1])
+            ytl, ybr = box[:, 1] * self.orig_size[0] / source_dim[0], \
+                       box[:, 3] * self.orig_size[0] / source_dim[0]
         else:
             xtl, xbr = box[:, 0] * (self.orig_size[1] / self.input_size[1]), \
                        box[:, 2] * (self.orig_size[1] / self.input_size[1])
