@@ -2,6 +2,7 @@
 
 import argparse
 import yaml
+import os
 
 from communicator import EvaluateInference
 from communicator.channel import grpc_channel, seerep_channel
@@ -21,70 +22,39 @@ FLAGS = None
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-cT',
-                        '--channel-triton',
-                        type=str,
+    parser.add_argument('-P',
+                        '--file-path',
                         required=True,
-                        default="localhost:8001",
-                        help='gRPC endpoint of the Triton inference server')
-    parser.add_argument('-cS',
-                        '--channel-seerep',
                         type=str,
-                        required=True,
-                        default="agrigaia-ur.ni.dfki:9090",
-                        help='gRPC endpoint of the SEEREP server')
-    parser.add_argument('-p',
-                        '--seerep-project',
-                        type=str,
-                        required=True,
-                        default="agrigaia-ur.ni.dfki:9090",
-                        help='Name of the SEEREP Project where the data is store e.g. "aitf-triton-data"')
-    parser.add_argument('-m',
-                        '--model-name',
-                        type=str,
-                        required=False,
-                        default="aitf-triton-data",
-                        help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
-    parser.add_argument('-x',
-                        '--model-version',
-                        type=str,
-                        required=False,
-                        default="",
-                        help='Version of model. Default is to use latest version.')
-    parser.add_argument('-l',
-                        '--log-level',
-                        type=str,
-                        required=False,
-                        default='error',
-                        choices=['info', 'warning', 'debug', "critical", "error"],
-                        help='Set logging level')
-    parser.add_argument('-b',
-                        '--batch-size',
-                        type=int,
-                        required=False,
-                        default=1,
-                        help='Batch size. Default is 1.')
-    parser.add_argument('-v',
-                        '--visualize',
-                        action='store_true',
-                        required=False,
-                        help='Visualize images')
-    parser.add_argument('-s',
-                        '--semantics',
-                        nargs='+',
-                        required=False,
-                        help='Provide SEEREP semantics as a list e.g. "-s person weather_general_cloudy "')
-    return parser.parse_args()
+                        help='Path of config files directory')
+    args=parser.parse_args()
+    
+    file_list=[]
+
+    for files in os.listdir(args.file_path):
+        if files.endswith('.yaml'):
+            file_path=os.path.join(args.file_path,files)
+            file_list.append(file_path)
+    
+    return file_list
 
 
 if __name__ == '__main__':
     FLAGS = parse_args()
-    # select client operations based on the model
-    client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
 
-    #define channel
-    channel = grpc_channel.GRPCChannel(FLAGS)
+    for file in FLAGS:
+        with open(file) as f:
+            data=yaml.load(f,Loader=yaml.loader.SafeLoader)
+            print('Starting with config file {}'.format(os.path.basename(file)))
+            # select client operations based on the model
+            client = clients[data['model_name']](model_name=data['model_name'])
 
-    #define inference
-    evaluation = EvaluateInference(FLAGS, channel, client)
-    evaluation.start_inference(FLAGS.model_name)
+            #define channel
+            channel = grpc_channel.GRPCChannel(data)
+
+            #define inference
+            evaluation = EvaluateInference(data, channel, client)
+            evaluation.start_inference(data['model_name'])
+
+            print('Config file {} ended'.format(os.path.basename(file)))
+            print('###################################################################################################################')
