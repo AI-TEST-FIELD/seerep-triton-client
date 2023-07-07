@@ -14,7 +14,7 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 class COCO_SEEREP:
-    def __init__(self, seerep_data=None):
+    def __init__(self, seerep_data=None, format='coco'):
         """
         Constructor of Microsoft COCO helper class for reading and visualizing annotations.
         :param annotation_file (str): location of annotation file
@@ -24,7 +24,7 @@ class COCO_SEEREP:
         self.seerep_data= seerep_data
         # self.anns =  {'weeds':0, 
         #                'maize':1}
-        self.anns = self.annotation_dict('coco')
+        self.anns = self.annotation_dict(format)
         self.ground_truth = self.init_gt()
         self.predictions = self.init_pred_result()
 

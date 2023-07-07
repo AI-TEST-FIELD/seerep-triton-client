@@ -81,11 +81,16 @@ def parse_args():
 if __name__ == '__main__':
     FLAGS = parse_args()
     # select client operations based on the model
+    queries = [query.lower() for query in FLAGS.semantics]
+    if len([v for v in queries if 'kitti' in v]) != 0:
+        format='kitti'
+    else:
+        format='coco'
     client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
 
     #define channel
     channel = grpc_channel.GRPCChannel(FLAGS)
 
     #define inference
-    evaluation = EvaluateInference(FLAGS, channel, client)
+    evaluation = EvaluateInference(FLAGS, channel, client, format=format)
     evaluation.start_inference(FLAGS.model_name)
