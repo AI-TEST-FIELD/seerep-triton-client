@@ -24,10 +24,29 @@ class COCO_SEEREP:
         self.seerep_data= seerep_data
         # self.anns =  {'weeds':0, 
         #                'maize':1}
-        self.anns =  {'person':0}
+        self.anns = self.annotation_dict('coco')
         self.ground_truth = self.init_gt()
         self.predictions = self.init_pred_result()
 
+    def annotation_dict(self, format='coco'):
+        anns_dict = {}
+        class_names= []
+        if format == 'coco':
+            filepath = 'config/coco.names'
+        elif format == 'kitti':
+            filepath = 'config/kitti.names'
+        elif format == 'crop':
+            filepath = 'config/crop.names'
+        with open(filepath, 'r') as fp:
+            lines = fp.readlines()
+        for line in lines:
+            line = line.rstrip()
+            class_names.append(line)
+        for id,idx in zip(class_names, range(len(class_names))):
+            anns_dict[id] = idx
+
+        return anns_dict
+    
 
     def init_gt(self):
         tic = time.time()
@@ -54,7 +73,7 @@ class COCO_SEEREP:
                 # put the annotations into coco format
                 tmp = {}
                 tmp['image_id'] = idx
-                tmp['category_id'] = annotation[4]+1
+                tmp['category_id'] = annotation[4]
                 tmp['bbox'] = annotation[0:4]
                 tmp['segmentation'] = []
                 tmp['area'] = (annotation[2])  * (annotation[3])
