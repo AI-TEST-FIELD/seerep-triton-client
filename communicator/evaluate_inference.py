@@ -173,7 +173,11 @@ class EvaluateInference(BaseInference):
                 self.prediction[0] = self._scale_box_array(self.prediction[0],  
                                                            source_dim=(r_h, r_w),
                                                            padded=True)
-                return self.prediction
+                if self.format=='kitti':
+                    persons = np.where(self.prediction[1] == 0) # filter persons
+                    return self.prediction[0][persons], self.prediction[1][persons], self.prediction[2][persons]
+                else:
+                    return self.prediction
             else:
                 return self.prediction
             
