@@ -13,6 +13,7 @@ clients = {
     'FCOS_detectron':FCOS_client,
     'dino_coco_600_squared':Detrex_client,
     'retinanet_coco':FCOS_client,
+    'retina_big':FCOS_client,
     # 'second_iou':Pointpillars_client,
     # more clients can be added
 }
