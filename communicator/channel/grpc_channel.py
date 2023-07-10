@@ -25,8 +25,8 @@ class GRPCChannel(BaseChannel):
          register grpc triton channel
         """
         grpc_channel =  grpc.insecure_channel(self.args.channel_triton ,options=[
-                                   ('grpc.max_send_message_length', self.FLAGS.batch_size*11997089),
-                                   ('grpc.max_receive_message_length', self.FLAGS.batch_size*11997089),
+                                   ('grpc.max_send_message_length', self.FLAGS.batch_size*17671546),
+                                   ('grpc.max_receive_message_length', self.FLAGS.batch_size*17671546),
                                     ])
         self._grpc_stub  = service_pb2_grpc.GRPCInferenceServiceStub(grpc_channel)
 

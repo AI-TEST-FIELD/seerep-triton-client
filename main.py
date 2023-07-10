@@ -10,8 +10,10 @@ from clients import Yolov5client, FCOS_client, Detrex_client
 clients = {
     'YOLOv5nCROP': Yolov5client,
     'YOLOv5nCOCO': Yolov5client,
+    'yolov5m_coco': Yolov5client,
     'FCOS_detectron':FCOS_client,
     'dino_coco_600_squared':Detrex_client,
+    'dino_coco_800':Detrex_client,
     'retinanet_coco':FCOS_client,
     'retina_big':FCOS_client,
     # 'second_iou':Pointpillars_client,
