@@ -397,7 +397,6 @@ class SEEREPChannel():
         )
         self._builder.Finish(queryMsg)
         buf = self._builder.Output()
-        
         data = []
         sample = {}
         category = 1 # ground_truth
@@ -407,6 +406,7 @@ class SEEREPChannel():
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
             sample['uuid'] = self._msguuid
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), 3))
+            tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
             sample['boxes'] = []
             # for category in range(response.LabelsBbLength()):
             for j in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
@@ -428,11 +428,16 @@ class SEEREPChannel():
                     sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
                 # For DEBUG
                 if self.vis:
-                    tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
-                    cv2.rectangle(tmp, 
-                                    (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
-                                    (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
-                                    (255, 0, 0), 2)
+            #         cv2.rectangle(tmp, 
+            #                       (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
+            #                       (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
+            #                       (255, 0, 0), 2)
+            #         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+            #         cv2.rectangle(tmp, 
+            #                       (int(sample['boxes'][j][0]), (int(sample['boxes'][j][1]) - 25)), 
+            #                       (int(sample['boxes'][j][0] + tw), int(sample['boxes'][j][1])), 
+            #                       (255, 0, 0), -1)
+            #         cv2.putText(tmp, label, (int(sample['boxes'][j][0]), int(sample['boxes'][j][1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
             # if self.vis:
             #     winname = 'image'
             #     cv2.namedWindow(winname)
@@ -440,6 +445,7 @@ class SEEREPChannel():
             #     cv2.moveWindow(winname, 3000,200)
             #     cv2.waitKey(0)
             #     cv2.destroyWindow(winname)    
+            #     tmp = None
             data.append(sample)
             sample={}
         logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))
