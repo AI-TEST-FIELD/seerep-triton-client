@@ -6,6 +6,7 @@ import numpy as np
 # import matplotlib.pyplot as plt
 # import matplotlib.patches as patches
 import logging
+from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -150,6 +151,10 @@ class EvaluateInference(BaseInference):
         s_h, s_w = cv_image.shape[0], cv_image.shape[1]
         n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
         cv_image, r_h, r_w = self.resize(cv_image)
+        # named_window = 'Resized source image'
+        # cv2.imshow(named_window, cv_image)
+        # cv2.waitKey()
+        # cv2.destroyWindow(named_window)
         tmp = cv_image.copy()
         self.image = self.client_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
@@ -162,18 +167,21 @@ class EvaluateInference(BaseInference):
             self.channel.response = self.channel.do_inference()  # Inference
             self.prediction = self.client_postprocess.extract_boxes(self.channel.response)
             if len(self.prediction[1]) > 0:
-                # if self.viz:
-                #     tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
-                #     for box in self.prediction[0]:
-                #         cv2.rectangle(tmp, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
-                #     named_window = 'Resized source image with prediction'
-                #     cv2.imshow(named_window, tmp)
-                #     cv2.waitKey()
-                #     cv2.destroyWindow(named_window)
+                if self.viz:
+                    tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
+                    for box in self.prediction[0]:
+                        cv2.rectangle(tmp, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
+                    named_window = 'Resized source image with prediction'
+                    cv2.imshow(named_window, tmp)
+                    cv2.waitKey()
+                    cv2.destroyWindow(named_window)
                 self.prediction[0] = self._scale_box_array(self.prediction[0],  
                                                            source_dim=(r_h, r_w),
                                                            padded=True)
                 if self.format=='kitti':
+                    persons = np.where(self.prediction[1] == 0) # filter Pedestrians
+                    return self.prediction[0][persons], self.prediction[1][persons], self.prediction[2][persons]
+                elif self.format=='coco':
                     persons = np.where(self.prediction[1] == 0) # filter persons
                     return self.prediction[0][persons], self.prediction[1][persons], self.prediction[2][persons]
                 else:
@@ -202,7 +210,7 @@ class EvaluateInference(BaseInference):
             # traverse through the images
             logger.info('Sending inference request to Triton for each image sample')
             infer_array = np.zeros(len(data), dtype=np.float16)
-            for sample, idx in zip(data, range(len(data))):
+            for sample, idx in tqdm(zip(data, range(len(data))), total=len(data)):
                 # perform an inference on each image, iteratively
                 t3 = time.time()
                 pred = self.seerep_infer(sample['image'])
@@ -223,11 +231,11 @@ class EvaluateInference(BaseInference):
                     bbs.append(((x,y), (w,h)))     # SEEREP expects center x,y and width, height
                     labels.append(label)
                     data[idx]['predictions'].append([start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]])
-                    (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                    cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
-                    cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
-                    cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
-                    sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
+                    # (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                    # cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
+                    # cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
+                    # cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
+                    # sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
                     # for obj in range(       
                         # cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
                 if self.viz:
@@ -240,7 +248,7 @@ class EvaluateInference(BaseInference):
                 # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
                 # TODO run evaluation without inference call
                 # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
-                logger.info('Sent boxes for image under category name {}'.format(self.model_name))
+                # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
             # Convert groundtruth and predictions to PyCOCO format for evaluation
             logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
             t5 = time.time()
