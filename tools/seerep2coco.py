@@ -72,14 +72,14 @@ class COCO_SEEREP:
             for annotation in item['boxes']:
                 # put the annotations into coco format
                 tmp = {}
-                tmp['image_id'] = idx
+                tmp['image_id'] = idx+1
                 tmp['category_id'] = annotation[4]
                 tmp['bbox'] = annotation[0:4]
                 tmp['segmentation'] = []
                 tmp['area'] = (annotation[2])  * (annotation[3])
                 tmp['iscrowd'] = 0
                 # xtl, ytl, w, h
-                tmp['id'] = label_id 
+                tmp['id'] = label_id+1
                 label_id += 1
                 self.cocoDataset['annotations'].append(tmp)
         for cat in self.anns:
@@ -105,7 +105,7 @@ class COCO_SEEREP:
             for item, img_idx in zip(self.seerep_data, range(len(self.seerep_data))):
                 for annotation in item['predictions']:
                     tmp = {}
-                    tmp['image_id'] = img_idx
+                    tmp['image_id'] = img_idx+1
                     tmp['category_id'] = int(annotation[4])+1   # category ids start from 1
                     tmp['bbox'] = annotation[0:4]
                     tmp['area'] = annotation[2] * annotation[3]
@@ -116,7 +116,7 @@ class COCO_SEEREP:
                     if not 'segmentation' in item:
                         tmp['segmentation'] = [[x1, y1, x1, y2, x2, y2, x2, y1]]
                     tmp['iscrowd'] = 0
-                    tmp['id'] = ann_idx # TODO this id corresponds to ID of each label, leaving it as 1 for now 
+                    tmp['id'] = ann_idx+1
                     ann_idx += 1
                     preds.append(tmp.copy())
         print('DONE (t={:0.2f}s)'.format(time.time()- tic))
