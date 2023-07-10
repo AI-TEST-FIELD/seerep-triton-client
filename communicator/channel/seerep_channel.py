@@ -427,7 +427,7 @@ class SEEREPChannel():
                     scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
                     sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
                 # For DEBUG
-                if self.vis:
+                # if self.vis:
             #         cv2.rectangle(tmp, 
             #                       (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
             #                       (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
