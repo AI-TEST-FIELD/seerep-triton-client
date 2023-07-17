@@ -1,0 +1,13 @@
+---
+
+channel_triton: '10.249.6.23:8001'
+channel_seerep: 'agrigaia-ur.ni.dfki:9090'
+seerep_project: 'aitf-triton-data'
+model_name: 'YOLOv5nCOCO'
+model_version: '' 
+log_level: 'info'
+batch_size: 1
+visualize: false
+semantics: 
+ - person 
+ - weatherGeneral_cloudy
