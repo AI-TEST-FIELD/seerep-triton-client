@@ -14,7 +14,8 @@ class PointPillarPostprocess(Postprocess):
     def postprocess(self):
         pass
 
-    def load_class_names(self, namesfile='./data/crop.names'):
+    def load_class_names(self, namesfile='/opt/client/config/kitti.names', dataset='KITTI'):
+        # TODO use dataset argument to differentiate between different LiDAR datasets such as NuScenes, KITTI
         class_names = []
         with open(namesfile, 'r') as fp:
             lines = fp.readlines()

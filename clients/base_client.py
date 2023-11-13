@@ -37,9 +37,9 @@ class Client(ABC):
             this client)
         """
 
-        if len(model_metadata.inputs) != 1:
-            raise Exception("expecting 1 input, got {}".format(
-                len(model_metadata.inputs)))
+        # if len(model_metadata.inputs) != 1:
+        #     raise Exception("expecting 1 input, got {}".format(
+        #         len(model_metadata.inputs)))
         # if len(model_metadata.outputs) != 1:
         #     raise Exception("expecting 1 output, got {}".format(
         #         len(model_metadata.outputs)))

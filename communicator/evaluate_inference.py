@@ -88,33 +88,56 @@ class EvaluateInference(BaseInference):
         meta_data = self.channel.get_metadata()
 
         # parse the model requirements from client
-        self.channel.input.name, output_name, c, h, w, format, self.channel.input.datatype = self.client.parse_model(
+        # self.channel.input.name, output_name, c, h, w, format, self.channel.input.datatype = self.client.parse_model(
+        #     meta_data["metadata_response"], meta_data["config_response"].config)
+
+        input_metadata, output_metadata = self.client.parse_model(
             meta_data["metadata_response"], meta_data["config_response"].config)
+        self.channel.input = [input['name'] for input in input_metadata]
+        self.channel.output = [output['name'] for output in output_metadata]
 
-        self.input_size = [h, w]
-        if format == mc.ModelInput.FORMAT_NHWC:
-            self.channel.input.shape.extend([h, w, c])
-        else:
-            self.channel.input.shape.extend([c, h, w])
+        self.inputs = {}
+        for input, i in zip(input_metadata, range(len(input_metadata))):
+            self.inputs['input_{}'.format(i)] = service_pb2.ModelInferRequest().InferInputTensor()
+            self.inputs['input_{}'.format(i)].name = input['name']
+            self.inputs['input_{}'.format(i)].datatype = input['dtype']
+            if -1 in input['shape']:
+                input['shape'][0] = 10000           # tmp
+            self.inputs['input_{}'.format(i)].shape.extend(input['shape'])
+            # assign the gathered model inputs to the grpc channel
+            self.channel.request.inputs.extend([self.inputs['input_{}'.format(i)]])
 
-        if len(output_name) > 1:  # Models with multiple outputs Boxes, Classes and scores
-            self.output0 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # boxes
-            self.output0.name = output_name[0]
-            self.output1 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # class_IDs
-            self.output1.name = output_name[1]
-            self.output2 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # scores
-            self.output2.name = output_name[2]
-            self.output3 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # image dims
-            self.output3.name = output_name[3]
+        self.outputs = {}
+        for output,i  in zip(output_metadata, range(len(output_metadata))):
+            self.outputs['output_{}'.format(i)] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
+            self.outputs['output_{}'.format(i)].name = output['name']
+            # assign the gathered model outputs to the grpc channel
+            self.channel.request.outputs.extend([self.outputs['output_{}'.format(i)]])
 
-            self.channel.request.outputs.extend([self.output0,
-                                                 self.output1,
-                                                 self.output2,
-                                                 self.output3])
-        else:
-            self.output = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-            self.output.name = output_name[0]
-            self.channel.request.outputs.extend([self.output])
+        # self.input_size = [h, w]
+        # if format == mc.ModelInput.FORMAT_NHWC:
+        #     self.channel.input.shape.extend([h, w, c])
+        # else:
+        #     self.channel.input.shape.extend([c, h, w])
+
+        # if len(output_name) > 1:  # Models with multiple outputs Boxes, Classes and scores
+        #     self.output0 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # boxes
+        #     self.output0.name = output_name[0]
+        #     self.output1 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # class_IDs
+        #     self.output1.name = output_name[1]
+        #     self.output2 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # scores
+        #     self.output2.name = output_name[2]
+        #     self.output3 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # image dims
+        #     self.output3.name = output_name[3]
+
+        #     self.channel.request.outputs.extend([self.output0,
+        #                                          self.output1,
+        #                                          self.output2,
+        #                                          self.output3])
+        # else:
+        #     self.output = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
+        #     self.output.name = output_name[0]
+        #     self.channel.request.outputs.extend([self.output])
         # self.channel.output.name = output_name[0]
         # self.channel.request.outputs.extend([self.channel.output])
 
@@ -198,7 +221,9 @@ class EvaluateInference(BaseInference):
 
         # data = schan.run_query()
         t1 = time.time()
-        data = schan.run_query_aitf(self.args.semantics)
+        # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
+        # data = schan.run_query_aitf(self.args.semantics)
+        data = schan.run_query_pc(self.args.semantics)
         t2 = time.time()
         if len(data) == 0:
             logger.error('No data samples found in the SEEREP database matching your query')
@@ -231,13 +256,13 @@ class EvaluateInference(BaseInference):
                     bbs.append(((x,y), (w,h)))     # SEEREP expects center x,y and width, height
                     labels.append(label)
                     data[idx]['predictions'].append([start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]])
-                    # (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                    # cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
-                    # cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
-                    # cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
+                    (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                    cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
+                    cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
+                    cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
                     # sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
                     # for obj in range(       
-                        # cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
+                    #     cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
                 if self.viz:
                     winname = 'Predicted image number {}'.format(idx+1)
                     cv2.namedWindow(winname)  

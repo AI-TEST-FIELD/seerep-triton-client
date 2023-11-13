@@ -11,18 +11,40 @@ import sys
 import cv2
 import numpy as np
 import logging
+import struct
 
 import flatbuffers
 import grpc
 from seerep.fb import BoundingBoxes2DLabeledStamped, Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
+from seerep.fb import PointCloud2 as pc2
 
 from seerep.fb import image_service_grpc_fb as imageService
+from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
 from seerep.fb import meta_operations_grpc_fb as metaOperations
+# from seerep.pb import point_cloud_service_pb2_grpc as 
 
 import communicator.channel.util_fb as util_fb
+from visual_utils import open3d_vis_utils as visualizer
+ros_test = True
 
+if ros_test:
+    from sensor_msgs.msg import PointCloud2, PointField
+    from sensor_msgs import point_cloud2
+    import rospy
+    
 import uuid
 logger = logging.getLogger("SEEREP-Client")
+
+Point_Field_Datatype =  {
+    0: 'unset',
+    1: np.int8,
+    2: np.uint8,
+    3: np.int16,
+    4: np.uint16,
+    5: np.uint32,
+    6: np.float32,
+    7: np.float64,
+}
 
 class SEEREPChannel():
     """
@@ -49,6 +71,10 @@ class SEEREPChannel():
         self.vis = visualize
         self.register_channel()
         self.ann_dict = self.annotation_dict(format=format)
+        if ros_test:
+            rospy.init_node('ros_infer')
+            self.ros_message = PointCloud2()
+            self.publisher = rospy.Publisher('/pointcloud2/test_pc', PointCloud2, queue_size=1)
 
         #self._grpc_metadata() #
 
@@ -67,6 +93,8 @@ class SEEREPChannel():
             channel = grpc.insecure_channel(self.socket) # use with local deployment
 
         return channel
+    
+
 
     def register_channel(self):
         """
@@ -74,8 +102,10 @@ class SEEREPChannel():
          socket: String, Port and IP address of seerep server
          seerep.robot.10.249.3.13.nip.io:32141
         """
-        self._grpc_stub  = imageService.ImageServiceStub(self.channel)
-        self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)  
+        # self._grpc_stub  = imageService.ImageServiceStub(self.channel)
+        # self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
+        self._grpc_stub = pointCloudService.PointCloudServiceStub(self.channel) 
+        self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel) 
         self._builder = self.init_builder()
         self._msgUuid = None
         self._projectid = self.retrieve_project(self.projname, log=True)
@@ -142,6 +172,30 @@ class SEEREPChannel():
         """
         return self._grpc_stub.ModelInfer(self.request)
 
+    def deserialize_bytes_float(self, encoded_tensor):
+        strs = list()
+        offset = 0
+        val_buf = encoded_tensor
+        datatype = "f"
+        l = struct.calcsize(datatype)
+        while offset < len(val_buf):
+            sb = struct.unpack_from(datatype, val_buf, offset)[0]
+            offset += l
+            strs.append(sb)
+        return (np.array(strs, dtype=np.object_))
+    
+    def deserialize_bytes_int(self, encoded_tensor):
+        strs = list()
+        offset = 0
+        val_buf = encoded_tensor
+        datatype = "l"
+        l = struct.calcsize(datatype)
+        while offset < len(val_buf):
+            sb = struct.unpack_from(datatype, val_buf, offset)[0]
+            offset += l
+            strs.append(sb)
+        return (np.array(strs, dtype=np.object_))
+
     def retrieve_project(self, projname, log=False):
         '''
         '''
@@ -152,7 +206,8 @@ class SEEREPChannel():
 
         responseBuf = self._grpc_stubmeta.GetProjects(bytes(buf))
         response = ProjectInfos.ProjectInfos.GetRootAs(responseBuf)
-        curr_proj = ''
+        curr_proj = None
+        logger.info("List of available projects on the SEEREP Server")
         for i in range(response.ProjectsLength()):
             if log==True:
                 try:
@@ -161,6 +216,8 @@ class SEEREPChannel():
                     if response.Projects(i).Name().decode("utf-8") == projname:
                         projectuuid = response.Projects(i).Uuid().decode("utf-8")
                         curr_proj = tmp
+                    else:
+                        logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
                 except Exception as e:
                     logger.error(e)
             else:
@@ -168,8 +225,12 @@ class SEEREPChannel():
                     projectuuid = response.Projects(i).Uuid().decode("utf-8")
                 except Exception as e:
                     logger.error(e)
-        logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
-        return projectuuid
+        if curr_proj == None:
+            logger.error("No SEEREP projects found on the server. Please check the SEEREP server host!")
+            sys.exit(0)
+        else:
+            logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
+            return projectuuid
 
     def string_to_fbmsg (self, projectuuid):
         projectuuidString = self._builder.CreateString(projectuuid)
@@ -369,6 +430,37 @@ class SEEREPChannel():
 
         return anns_dict
 
+    def publish_pc(self, response, fields):
+        import std_msgs.msg
+        import sensor_msgs.point_cloud2 as pcl2
+
+        self.ros_message.height = response.Height()
+        self.ros_message.width = response.Width()
+        self.ros_message.is_bigendian = response.IsBigendian()
+        self.ros_message.is_dense = response.IsDense()
+        self.ros_message.row_step = response.RowStep()
+        for f in fields:
+            if fields[f]['dtype'] == 7:
+                dtype = PointField.FLOAT32
+            elif fields[f]['dtype'] == 4:
+                dtype = PointField.UINT16
+            elif fields[f]['dtype'] == 6:
+                dtype = PointField.UINT32
+            self.ros_message.fields.append(PointField(
+                name=f,
+                offset=fields[f]['offset'],
+                datatype=dtype, 
+                count=1
+            ))
+        self.ros_message.data = response.DataAsNumpy()
+        # Initialize empty header
+        header = std_msgs.msg.Header()
+        header.seq = response.Header().Seq()
+        header.stamp = rospy.Time.now()
+        header.frame_id = response.Header().FrameId().decode("utf-8")
+        self.ros_message.header = header
+        for i in range(10000):
+            self.publisher.publish(self.ros_message)
 
     def run_query_aitf(self, *args):
         projectuuidString = self._builder.CreateString(self._projectid)
@@ -388,12 +480,12 @@ class SEEREPChannel():
             self._builder,
             # boundingBox=boundingboxStamped,
             # timeInterval=timeInterval,
-            labels=labelCategory,
-            mustHaveAllLabels=True,
+            # labels=labelCategory,
+            # mustHaveAllLabels=False,
             projectUuids=projectUuids,
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
-            withoutData=False,
+            withoutData=True,
         )
         self._builder.Finish(queryMsg)
         buf = self._builder.Output()
@@ -451,6 +543,81 @@ class SEEREPChannel():
         logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))
         return data
     
+    def run_query_pc(self, *args):
+        projectuuidString = self._builder.CreateString(self._projectid)
+        Query.StartProjectuuidVector(self._builder, 1)
+        self._builder.PrependUOffsetTRelative(projectuuidString)
+        projectuuidMsg = self._builder.EndVector()
+        projectUuids = [projectuuidString]
+        # categories = ['ground_truth']
+        # labels = [[util_fb.createLabelWithConfidence(self._builder, "person"), 
+        #         #    util_fb.createLabelWithConfidence(self._builder, "weather_general_sun"),
+        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_cloudy"),
+        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_rain"),
+        #          ]]
+        # labels = [[util_fb.createLabelWithConfidence(self._builder, semantic) for semantic in args[0]]]
+        # labelCategory = util_fb.createLabelWithCategory(self._builder, categories, labels)
+        queryMsg = util_fb.createQuery(
+            self._builder,
+            # boundingBox=boundingboxStamped,
+            # timeInterval=timeInterval,
+            # labels=labelCategory,
+            # mustHaveAllLabels=False,
+            projectUuids=projectUuids,
+            # instanceUuids=instanceUuids,
+            # dataUuids=dataUuids,
+            withoutData=False,
+        )
+        self._builder.Finish(queryMsg)
+        buf = self._builder.Output()
+        data = []
+        sample = {}
+        category = 1 # ground_truth
+        for responseBuf in self._grpc_stub.GetPointCloud2(bytes(buf)):
+            logger.info('Receiving pointclouds from the SEEREP server')
+            response = pc2.PointCloud2.GetRootAs(responseBuf)
+            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
+            sample['uuid'] = self._msguuid
+            raw_data = response.DataAsNumpy()
+            fields = {}
+            chunk_size = 0   # combined byte-size for single entry of each field
+            dtype = None
+            for j in range(response.FieldsLength()):
+                fields[response.Fields(j).Name().decode('utf-8')] = {}
+                fields[response.Fields(j).Name().decode('utf-8')]['offset'] = response.Fields(j).Offset()
+                fields[response.Fields(j).Name().decode('utf-8')]['dtype'] = response.Fields(j).Datatype()
+                dtype = Point_Field_Datatype[response.Fields(j).Datatype()]
+                if dtype == np.float32:
+                    c = 'f'
+                elif dtype == np.uint16:
+                    c = 'l'
+                elif dtype == np.float64:
+                    c = 'd'
+                else: 
+                    print('Invalid data type')
+                fields[response.Fields(j).Name().decode('utf-8')]['data_string'] = c
+                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c) 
+                chunk_size += fields[response.Fields(j).Name().decode('utf-8')]['size']
+            for field in fields:
+                strs = list()
+                for i in range(fields[field]['offset'], raw_data.shape[0], chunk_size):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
+                    sb = struct.unpack(fields[field]['data_string'], raw_data[i : i + fields[field]['size']])
+                    strs.append(sb)
+
+                fields[field]['data'] = (np.array(strs, dtype=np.object_))
+                strs = []
+            self.publish_pc(response, fields)
+            if True:    # TODO visualize flag with open3d
+                pc = np.zeros((49152, 3), dtype=np.float64)
+                pc[:, 0] = fields['x']['data'][:, 0]
+                pc[:, 1] = fields['y']['data'][:, 0]
+                pc[:, 2] = fields['z']['data'][:, 0]
+                visualizer.draw_scenes(pc)
+            data.append(sample)
+
+            sample={}
+        logger.critical('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
+        return data
     def sendboundingbox(self, sample, bbs, labels, confidences, model_name):
         header = util_fb.createHeader(
             self._builder,

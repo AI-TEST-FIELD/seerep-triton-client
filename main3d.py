@@ -5,7 +5,7 @@ import yaml
 
 from communicator import EvaluateInference
 from communicator.channel import grpc_channel, seerep_channel
-from clients import Yolov5client, FCOS_client, Detrex_client
+from clients import Yolov5client, FCOS_client, Detrex_client, Pointpillars_client
 
 clients = {
     'YOLOv5nCROP': Yolov5client,
@@ -17,7 +17,7 @@ clients = {
     'dino_coco_800':Detrex_client,
     'retinanet_coco':FCOS_client,
     'retina_big':FCOS_client,
-    # 'second_iou':Pointpillars_client,
+    'second_iou':Pointpillars_client,
     # more clients can be added
 }
 

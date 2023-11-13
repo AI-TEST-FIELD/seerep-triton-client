@@ -33,7 +33,7 @@ class Yolov5postprocess(Postprocess):
             class_names.append(line)
         return class_names
 
-    def extract_boxes(self, prediction, conf_thres=0.3, iou_thres=0.45, classes=None, agnostic=False,
+    def extract_boxes(self, prediction, conf_thres=0.4, iou_thres=0.45, classes=None, agnostic=False,
                              multi_label=False,
                              labels=(), max_det=300):
         """Runs Non-Maximum Suppression (NMS) on inference results

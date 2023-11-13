@@ -7,7 +7,7 @@ import numpy as np
 class PointpillarPreprocess(Preprocess):
 
     def __init__(self):
-        with open('/workspace/triton_client/data/kitti_dataset.yaml', 'r') as f:
+        with open('/opt/client/config/kitti_dataset.yaml', 'r') as f:
             self.dataset_cfg = EasyDict(yaml.safe_load(f))
         self.point_cloud_range = np.array(self.dataset_cfg.POINT_CLOUD_RANGE, dtype=np.float32)
         self.point_feature_encoder = processor.point_feature_encoder.PointFeatureEncoder(
