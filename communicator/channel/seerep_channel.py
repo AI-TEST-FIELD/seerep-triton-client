@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 import logging
 import struct
+from copy import copy, deepcopy
 
 import flatbuffers
 import grpc
@@ -21,6 +22,7 @@ from seerep.fb import PointCloud2 as pc2
 from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
 from seerep.fb import meta_operations_grpc_fb as metaOperations
+# from seerep.util.fb_helper import rosToNumpyDtype
 # from seerep.pb import point_cloud_service_pb2_grpc as 
 
 import communicator.channel.util_fb as util_fb
@@ -37,13 +39,14 @@ logger = logging.getLogger("SEEREP-Client")
 
 Point_Field_Datatype =  {
     0: 'unset',
-    1: np.int8,
-    2: np.uint8,
-    3: np.int16,
-    4: np.uint16,
-    5: np.uint32,
-    6: np.float32,
-    7: np.float64,
+    1: np.dtype(np.int8),
+    2: np.dtype(np.uint8),
+    3: np.dtype(np.int16),
+    4: np.dtype(np.uint16),
+    5: np.dtype(np.int32),
+    6: np.dtype(np.uint32),
+    7: np.dtype(np.float32),
+    8: np.dtype(np.float64),
 }
 
 class SEEREPChannel():
@@ -65,16 +68,17 @@ class SEEREPChannel():
         self.socket = socket
         self.projname = project_name
         self.normalized_coors = False
+        self.visualize = visualize
 
         # register and initialise the stub
         self.channel = self.make_channel(secure=False)
         self.vis = visualize
         self.register_channel()
         self.ann_dict = self.annotation_dict(format=format)
-        if ros_test:
-            rospy.init_node('ros_infer')
-            self.ros_message = PointCloud2()
-            self.publisher = rospy.Publisher('/pointcloud2/test_pc', PointCloud2, queue_size=1)
+        # if ros_test:
+        #     rospy.init_node('ros_infer')
+        #     self.ros_message = PointCloud2()
+        #     self.publisher = rospy.Publisher('/pointcloud2/test_pc', PointCloud2, queue_size=1)
 
         #self._grpc_metadata() #
 
@@ -94,8 +98,6 @@ class SEEREPChannel():
 
         return channel
     
-
-
     def register_channel(self):
         """
          register grpc triton channel
@@ -430,6 +432,15 @@ class SEEREPChannel():
 
         return anns_dict
 
+    def unpack_point_fields(self, point_cloud: pc2.PointCloud2) -> dict:
+        """Extract the point fields from a Flatbuffer pcl message"""
+        return {
+            "name": [point_cloud.Fields(i).Name().decode("utf-8") for i in range(point_cloud.FieldsLength())],
+            "datatype": [point_cloud.Fields(i).Datatype() for i in range(point_cloud.FieldsLength())],
+            "offset": [point_cloud.Fields(i).Offset() for i in range(point_cloud.FieldsLength())],
+            "count": [point_cloud.Fields(i).Count() for i in range(point_cloud.FieldsLength())],
+        }
+    
     def publish_pc(self, response, fields):
         import std_msgs.msg
         import sensor_msgs.point_cloud2 as pcl2
@@ -462,7 +473,7 @@ class SEEREPChannel():
         for i in range(10000):
             self.publisher.publish(self.ros_message)
 
-    def run_query_aitf(self, *args):
+    def run_query_images(self, *args):
         projectuuidString = self._builder.CreateString(self._projectid)
         Query.StartProjectuuidVector(self._builder, 1)
         self._builder.PrependUOffsetTRelative(projectuuidString)
@@ -543,20 +554,12 @@ class SEEREPChannel():
         logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))
         return data
     
-    def run_query_pc(self, *args):
+    def run_query_pointclouds(self, *args):
         projectuuidString = self._builder.CreateString(self._projectid)
         Query.StartProjectuuidVector(self._builder, 1)
         self._builder.PrependUOffsetTRelative(projectuuidString)
         projectuuidMsg = self._builder.EndVector()
         projectUuids = [projectuuidString]
-        # categories = ['ground_truth']
-        # labels = [[util_fb.createLabelWithConfidence(self._builder, "person"), 
-        #         #    util_fb.createLabelWithConfidence(self._builder, "weather_general_sun"),
-        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_cloudy"),
-        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_rain"),
-        #          ]]
-        # labels = [[util_fb.createLabelWithConfidence(self._builder, semantic) for semantic in args[0]]]
-        # labelCategory = util_fb.createLabelWithCategory(self._builder, categories, labels)
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
@@ -570,54 +573,76 @@ class SEEREPChannel():
         )
         self._builder.Finish(queryMsg)
         buf = self._builder.Output()
+        # Collect list of all data samples returned from SEEREP into data
         data = []
+        # Collect the UUIDs and data from each sample sent by SEEREP project. 
         sample = {}
-        category = 1 # ground_truth
         for responseBuf in self._grpc_stub.GetPointCloud2(bytes(buf)):
             logger.info('Receiving pointclouds from the SEEREP server')
             response = pc2.PointCloud2.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
+            height = response.Width()
+            width = response.Height()
+            # TODO change the decoding to numpy for cleaner implementation
+            # point_fields = self.unpack_point_fields(response)
+            # dtypes = np.dtype(
+            #     {
+            #         "names": point_fields["name"],
+            #         "formats": [Point_Field_Datatype[datatype] for datatype in point_fields['datatype']],
+            #         "offsets": point_fields["offset"],
+            #         "itemsize": response.PointStep(),
+            #     }
+            # )
+            # decoded_payload = np.frombuffer(response.DataAsNumpy(), dtype=dtypes)
+            # reshaped_data = np.reshape(decoded_payload, (response.Height(), response.Width()))
+
             sample['uuid'] = self._msguuid
             raw_data = response.DataAsNumpy()
             fields = {}
-            chunk_size = 0   # combined byte-size for single entry of each field
             dtype = None
             for j in range(response.FieldsLength()):
                 fields[response.Fields(j).Name().decode('utf-8')] = {}
                 fields[response.Fields(j).Name().decode('utf-8')]['offset'] = response.Fields(j).Offset()
                 fields[response.Fields(j).Name().decode('utf-8')]['dtype'] = response.Fields(j).Datatype()
                 dtype = Point_Field_Datatype[response.Fields(j).Datatype()]
-                if dtype == np.float32:
+                # https://docs.python.org/2/library/struct.html          
+                if dtype == np.int16:    # 16 bit short
+                    c = 'h'
+                elif dtype == np.uint16:    # 16 bit unsigned-short
+                    c = 'H'
+                elif dtype == np.int32:    # 32 bit int 
+                    c = 'i'
+                elif dtype == np.uint32:    # 32 bit unsigned int 
+                    c = 'I'
+                elif dtype == np.float32:   # 32 bit float
                     c = 'f'
-                elif dtype == np.uint16:
-                    c = 'l'
-                elif dtype == np.float64:
+                elif dtype == np.float64:   # 64 bit double 
                     c = 'd'
                 else: 
                     print('Invalid data type')
                 fields[response.Fields(j).Name().decode('utf-8')]['data_string'] = c
                 fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c) 
-                chunk_size += fields[response.Fields(j).Name().decode('utf-8')]['size']
             for field in fields:
                 strs = list()
-                for i in range(fields[field]['offset'], raw_data.shape[0], chunk_size):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
+                for i in range(fields[field]['offset'], raw_data.shape[0], response.PointStep()):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
                     sb = struct.unpack(fields[field]['data_string'], raw_data[i : i + fields[field]['size']])
                     strs.append(sb)
-
                 fields[field]['data'] = (np.array(strs, dtype=np.object_))
                 strs = []
-            self.publish_pc(response, fields)
-            if True:    # TODO visualize flag with open3d
-                pc = np.zeros((49152, 3), dtype=np.float64)
+            sample['point_cloud'] = copy(fields) 
+            if self.visualize:    # TODO visualize flag with open3d
+                pc = np.zeros((height*width, 3), dtype=np.float64)
                 pc[:, 0] = fields['x']['data'][:, 0]
                 pc[:, 1] = fields['y']['data'][:, 0]
                 pc[:, 2] = fields['z']['data'][:, 0]
                 visualizer.draw_scenes(pc)
+            # Store the sample into data collection
             data.append(sample)
-
+            # flush the sample data for new incoming samples
             sample={}
         logger.critical('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data
+    
     def sendboundingbox(self, sample, bbs, labels, confidences, model_name):
         header = util_fb.createHeader(
             self._builder,
