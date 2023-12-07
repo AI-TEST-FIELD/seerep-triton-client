@@ -222,8 +222,8 @@ class EvaluateInference(BaseInference):
         # data = schan.run_query()
         t1 = time.time()
         # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
-        # data = schan.run_query_aitf(self.args.semantics)
-        data = schan.run_query_pc(self.args.semantics)
+        # data = schan.run_query_images(self.args.semantics)
+        data = schan.run_query_pointclouds(self.args.semantics)
         t2 = time.time()
         if len(data) == 0:
             logger.error('No data samples found in the SEEREP database matching your query')
