@@ -3,8 +3,7 @@ import cv2
 import imutils
 import time
 import numpy as np
-# import matplotlib.pyplot as plt
-# import matplotlib.patches as patches
+import sys
 import logging
 from tqdm import tqdm
 from pycocotools.coco import COCO
@@ -16,8 +15,11 @@ from .channel import grpc_channel
 from .base_inference import BaseInference
 from communicator.channel import seerep_channel
 from tools.seerep2coco import COCO_SEEREP
-# from utils import image_util
-logger = logging.getLogger("Triton-Client")
+from logger import Client_logger, TqdmToLogger
+
+logger = Client_logger(name='Triton-Client', level=logging.INFO).get_logger()
+tqdm_out = TqdmToLogger(logger,level=logging.INFO)
+
 class EvaluateInference(BaseInference):
 
     """
@@ -49,9 +51,12 @@ class EvaluateInference(BaseInference):
             # TODO shutdown? 
             self.class_names=None
         self.input_datatypes = {
-            'UINT8': np.uint8,
-            'FP32': np.float32,
-            'FP16':np.float16,
+            'UINT8': np.dtype(np.uint8),
+            'INT16': np.dtype(np.int16),
+            'INT32': np.dtype(np.int32),
+            'FP16':np.dtype(np.float16),
+            'FP32': np.dtype(np.float32),
+            'FP64': np.dtype(np.float64),
         }
         log_level = {
             'info': logging.INFO,
@@ -166,7 +171,7 @@ class EvaluateInference(BaseInference):
         # cv2.destroyWindow(named_window)
         return padded_image, cv_image.shape[0], cv_image.shape[1]
 
-    def seerep_infer(self, image):
+    def seerep_infer_image(self, image):
         # convert numpy array to cv2
         cv_image = image
         self.orig_size = cv_image.shape[0:2]
@@ -211,34 +216,92 @@ class EvaluateInference(BaseInference):
                     return self.prediction
             else:
                 return self.prediction
-            
-    def start_inference(self, model_name, format='coco'):
-        schan = seerep_channel.SEEREPChannel(project_name=self.args.seerep_project,
-                                            socket=self.args.channel_seerep,
-                                            format=self.format,     #TODO make it dynamic with Source_Kitti
-                                            visualize=self.viz)
-                                            # socket='localhost:9090')
+    
+    def seerep_infer_pc(self, pointclouds: np.array):
+        num_points = pointclouds['x']['data'].shape[0]
+        # Keep only x,y,z i.e. 3 dims 
+        self.pc = np.zeros((num_points, 3), dtype=np.float32)
+        self.pc[:, 0] = pointclouds['x']['data'][:, 0]
+        self.pc[:, 1] = pointclouds['y']['data'][:, 0]
+        self.pc[:, 2] = pointclouds['z']['data'][:, 0]
+        self.pc = self.client_preprocess.filter_pc(self.pc)
+        num_voxels = self.pc['voxels'].shape[0]
+        self.channel.request.ClearField("raw_input_contents")  # Flush the previous sample content
+        for key, idx in zip(self.inputs, range(len(self.inputs))):
+            tmp_shape = self.inputs[key].shape
+            self.inputs[key].ClearField("shape")
+            tmp_shape[0] = num_voxels
+            self.channel.request.inputs[idx].ClearField("shape")
+            self.channel.request.inputs[idx].shape.extend(tmp_shape)
+            self.inputs[key].shape.extend(tmp_shape)
+        
+        # Make sure the data types are correct for each input before sending them as bytes, this causes wrong array values on the server 
+        assert self.pc['voxels'].dtype == self.input_datatypes[self.inputs['input_0'].datatype]
+        assert self.pc['voxel_coords'].dtype == self.input_datatypes[self.inputs['input_1'].datatype]
+        assert self.pc['voxel_num_points'].dtype == self.input_datatypes[self.inputs['input_2'].datatype]
+        self.channel.request.raw_input_contents.extend([self.pc['voxels'].tobytes(),
+                                                        self.pc['voxel_coords'].tobytes(),
+                                                        self.pc['voxel_num_points'].tobytes(),
+                                                        ])
+        self.channel.response = self.channel.do_inference() # perform the channel Inference
+        self.output = self.client_postprocess.extract_boxes(self.channel.response)
+        box_array = self.output['pred_boxes']
+        scores = self.output['pred_scores']
+        labels = self.output['pred_labels']
+        # class ID 2 corresponds to pedestrians 
+        # indices = np.where((labels == 2) & (scores > 0.2))[0].tolist()
+        indices = np.where((labels == 2) & (scores > 0.5))[0].tolist()
+        # print(np.unique(labels))
 
-        # data = schan.run_query()
-        t1 = time.time()
-        # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
-        # data = schan.run_query_images(self.args.semantics)
-        data = schan.run_query_pointclouds(self.args.semantics)
+        detection_array = Detection3DArray()
+        # for idx in indices:
+        for idx in range(len(box_array)):
+            detection = Detection3D()
+            bbox3D = BoundingBox3D()
+            object_hypothesis = ObjectHypothesisWithPose()
+            bbox3D.center.position.x = box_array[idx, 0]
+            bbox3D.center.position.y = box_array[idx, 1]
+            bbox3D.center.position.z = box_array[idx, 2]
+            q = self.yaw2quaternion(float(box_array[idx, 8]))
+            bbox3D.center.orientation.w = q[0]
+            bbox3D.center.orientation.x = q[1]
+            bbox3D.center.orientation.y = q[2]
+            bbox3D.center.orientation.z = q[3]
+            bbox3D.size.x = box_array[idx, 4]
+            bbox3D.size.y = box_array[idx, 3]
+            bbox3D.size.z = box_array[idx, 5] 
+            object_hypothesis.score = copy(scores[idx])
+            object_hypothesis.id = copy(labels[idx])
+            detection.bbox = bbox3D
+            bbox3D = None   #Flush 
+            detection.header = msg.header
+            detection.results.append(object_hypothesis)
+            object_hypothesis = None # Flush
+            detection_array.detections.append(detection)
+            detection = None    #Flush
+            t2 = time.time()
+
+    def process_images(self, data, seerep_channel: seerep_channel.SEEREPChannel):
         t2 = time.time()
         if len(data) == 0:
-            logger.error('No data samples found in the SEEREP database matching your query')
+            logger.critical('No data samples found in the SEEREP database matching your query')
         else:
-            logger.info('Fetching time: {} s'.format(np.round(t2 - t1, 3)))
+            # logger.info('Fetching time: {} s'.format(np.round(t2 - t1, 3)))
             color1 = (255, 0, 0)    #red
             color2 = (255, 255, 255)    #green
             text_color = (255, 255, 255)
             # traverse through the images
-            logger.info('Sending inference request to Triton for each image sample')
+            # logger.info('Sending inference request to Triton for each sample')
             infer_array = np.zeros(len(data), dtype=np.float16)
-            for sample, idx in tqdm(zip(data, range(len(data))), total=len(data)):
+            for sample, idx in tqdm(zip(data, range(len(data))), 
+                                    total=len(data),
+                                    colour='GREEN',
+                                    desc='Sending inference request to Triton for each sample',
+                                    unit='Inference Requests',
+                                    ascii=True):
                 # perform an inference on each image, iteratively
                 t3 = time.time()
-                pred = self.seerep_infer(sample['image'])
+                pred = self.seerep_infer_image(sample['images'])
                 t4 = time.time()
                 infer_array[idx] = t4 - t3
                 # logger.info('Inference time: {}'.format(t4 - t3))
@@ -256,6 +319,7 @@ class EvaluateInference(BaseInference):
                     bbs.append(((x,y), (w,h)))     # SEEREP expects center x,y and width, height
                     labels.append(label)
                     data[idx]['predictions'].append([start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]])
+                if self.viz:
                     (tw, th), _ = cv2.getTextSize('{} {} %'.format(label, round(pred[2][obj]*100, 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
                     cv2.rectangle(sample['image'], (int(pred[0][obj, 0]), int(pred[0][obj, 1])), (int(pred[0][obj, 2]), int(pred[0][obj, 3])), color1, 2)
                     cv2.rectangle(sample['image'], (int(start_cord[0]), int(start_cord[1] - 25)), (int(start_cord[0] + tw), int(start_cord[1])), color1, -1)
@@ -263,7 +327,6 @@ class EvaluateInference(BaseInference):
                     # sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
                     # for obj in range(       
                     #     cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
-                if self.viz:
                     winname = 'Predicted image number {}'.format(idx+1)
                     cv2.namedWindow(winname)  
                     cv2.imshow(winname, cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
@@ -274,16 +337,61 @@ class EvaluateInference(BaseInference):
                 # TODO run evaluation without inference call
                 # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
                 # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
-            # Convert groundtruth and predictions to PyCOCO format for evaluation
-            logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
-            t5 = time.time()
-            coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
-            cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
-            cocoEval.evaluate()
-            cocoEval.accumulate()
-            cocoEval.summarize()
-            t6 = time.time()
-            logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
+
+    def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
+        # traverse through the samples
+        infer_array = np.zeros(len(data), dtype=np.float16)
+        for sample, idx in tqdm(zip(data, range(len(data))), 
+                                total=len(data),
+                                colour='GREEN',
+                                file=tqdm_out,
+                                desc='Sending inference request to Triton for each sample',
+                                unit='Inference Requests'):
+            # perform an inference on each image, iteratively
+            t3 = time.time()
+            pred = self.seerep_infer_pc(sample['point_cloud'])
+            t4 = time.time()
+            infer_array[idx] = t4 - t3
+            # logger.info('Inference time: {}'.format(t4 - t3))
+            sample['predictions'] = []
+            bbs = []
+            labels = []
+            confidences = []
+            # traverse the predictions for the current pointclouds
+            for obj in range(len(pred[1])):
+                pass
+            if self.viz:
+                pass
+            # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
+            # TODO run evaluation without inference call
+            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
+            # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
+        # Convert groundtruth and predictions to PyCOCO format for evaluation
+        logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
+        t5 = time.time()
+        coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
+        cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
+        cocoEval.evaluate()
+        cocoEval.accumulate()
+        cocoEval.summarize()
+        t6 = time.time()
+        logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
+
+    def start_inference(self, model_name, format='coco'):
+        schan = seerep_channel.SEEREPChannel(project_name=self.args.seerep_project,
+                                            socket=self.args.channel_seerep,
+                                            format=self.format,     #TODO make it dynamic with Source_Kitti
+                                            visualize=self.viz)
+                                            # socket='localhost:9090')
+
+        # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
+        sample_type = 'point_clouds'
+        if sample_type == 'image':
+            data = schan.run_query_images(self.args.semantics)
+            self.process_images(data, schan)
+        elif sample_type == 'point_clouds':
+            data = schan.run_query_pointclouds(self.args.semantics)
+            self.process_pc(data, schan)
 
     def _scale_boxes(self, box, normalized=False):
         '''
