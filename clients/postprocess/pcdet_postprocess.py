@@ -7,7 +7,7 @@ import numpy as np
 # import torch
 # import torchvision
 
-class PointPillarPostprocess(Postprocess):
+class PCDetPostprocess(Postprocess):
     def __init__(self):
         pass
 

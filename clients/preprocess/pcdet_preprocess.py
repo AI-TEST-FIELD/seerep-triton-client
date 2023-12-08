@@ -4,7 +4,7 @@ import yaml
 from easydict import EasyDict
 import numpy as np
 
-class PointpillarPreprocess(Preprocess):
+class PCDetPreprocess(Preprocess):
 
     def __init__(self):
         with open('/opt/client/config/kitti_dataset.yaml', 'r') as f:
@@ -33,6 +33,8 @@ class PointpillarPreprocess(Preprocess):
         data_dict['voxel_coords'] = (Number of filled voxels, 3)
         data_dict['voxel_num_points'] = N* range filtered points
         '''
+
+        
         data_dict = {
             'points': pointcloud_array,
             'frame_id': 1,

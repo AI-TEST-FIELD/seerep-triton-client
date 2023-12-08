@@ -1,6 +1,6 @@
 from .base_client import Client
-from .preprocess import PointpillarPreprocess
-from .postprocess import PointPillarPostprocess
+from .preprocess import PCDetPreprocess
+from .postprocess import PCDetPostprocess
 
 class Pointpillars_client(Client):
     """
@@ -17,10 +17,10 @@ class Pointpillars_client(Client):
         self._clients[clienttype] = client
 
     def get_preprocess(self):
-        return PointpillarPreprocess()
+        return PCDetPreprocess()
 
     def get_postprocess(self):
-        return PointPillarPostprocess()
+        return PCDetPostprocess()
 
     # Override function from the base class.
     def parse_model(self, model_metadata, model_config):

@@ -1,5 +1,7 @@
 
 from communicator.channel.base_channel import BaseChannel
+from logger import Client_logger, TqdmToLogger
+import logging
 #from base_channel import BaseChannel
 
 import grpc
@@ -10,9 +12,10 @@ import os
 import sys
 import cv2
 import numpy as np
-import logging
 import struct
-from copy import copy, deepcopy
+import uuid
+from tqdm import tqdm
+from copy import copy
 
 import flatbuffers
 import grpc
@@ -23,19 +26,12 @@ from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
 from seerep.fb import meta_operations_grpc_fb as metaOperations
 # from seerep.util.fb_helper import rosToNumpyDtype
-# from seerep.pb import point_cloud_service_pb2_grpc as 
 
 import communicator.channel.util_fb as util_fb
 from visual_utils import open3d_vis_utils as visualizer
-ros_test = True
 
-if ros_test:
-    from sensor_msgs.msg import PointCloud2, PointField
-    from sensor_msgs import point_cloud2
-    import rospy
-    
-import uuid
-logger = logging.getLogger("SEEREP-Client")
+logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
+tqdm_out = TqdmToLogger(logger,level=logging.INFO)
 
 Point_Field_Datatype =  {
     0: 'unset',
@@ -551,7 +547,7 @@ class SEEREPChannel():
             #     tmp = None
             data.append(sample)
             sample={}
-        logger.critical('Fetched {} images from the current SEEREP project'.format(len(data)))
+        logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
         return data
     
     def run_query_pointclouds(self, *args):
@@ -577,8 +573,16 @@ class SEEREPChannel():
         data = []
         # Collect the UUIDs and data from each sample sent by SEEREP project. 
         sample = {}
-        for responseBuf in self._grpc_stub.GetPointCloud2(bytes(buf)):
-            logger.info('Receiving pointclouds from the SEEREP server')
+        # TODO the num_samples should be replaced by the total number of samples inside the seerep project
+        num_samples = 2
+        for responseBuf, curr_sample in tqdm(zip(self._grpc_stub.GetPointCloud2(bytes(buf)),
+                                    range(num_samples)),
+                                    total=num_samples,
+                                    colour='GREEN',
+                                    file=tqdm_out,
+                                    desc='Receiving pointclouds from the SEEREP server',
+                                    unit="samples"):
+            # logger.info('Receiving pointclouds from the SEEREP server')
             response = pc2.PointCloud2.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
             height = response.Width()
@@ -640,7 +644,10 @@ class SEEREPChannel():
             data.append(sample)
             # flush the sample data for new incoming samples
             sample={}
-        logger.critical('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
+            curr_sample+=1
+            if curr_sample==0:
+                break
+        logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data
     
     def sendboundingbox(self, sample, bbs, labels, confidences, model_name):
