@@ -6,10 +6,11 @@ opencv-python<=4.8.0.74
 opencv-contrib-python<=4.7.0.72
 torchvision>=0.14.0
 imutils 
-# PCDet dependencies
+# 3D inference with OpenPCDet 
 pyquaternion
 easydict
 pyquaternion
 pyyaml
 kornia==0.6.8
 av2
+spconv<=2.3.6
