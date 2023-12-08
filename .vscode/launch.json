@@ -70,7 +70,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python",
+                "XDG_RUNTIME_DIR":"/opt/client/.xdg"
             },
             
         },
