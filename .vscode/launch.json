@@ -56,7 +56,7 @@
                 // "-cS", "agrigaia-ur.ni.dfki:9090",
                 "--seerep-project", "AI-TEST-FIELD",
                 "--model-name", "second_iou",
-                // "--seerep-project", "aitf-triton-data",
+                // "--model-name", "pointpillar_kitti",
                 "--log-level", "info",
                 "--semantics",
                 // "weatherGeneral_cloudy", 
@@ -86,6 +86,21 @@
                 "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
             },
             
+        },
+        {
+            "name": "Demo pcdet",
+            "type": "python",
+            "request": "launch",
+            "program": "OpenPCDet/tools/demo.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--cfg_file","second_iou.yaml",
+                "--ckpt","second_iou_kitti.pth",
+                // "--cfg_file","PartA2_free.yaml",
+                // "--ckpt","PartA2_free_7872.pth",
+                "--data_path","000076.bin",
+            ]
         }
     ]
 }
