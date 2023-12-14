@@ -55,6 +55,13 @@ cover/
 *.mo
 *.pot
 
+*.bin
+*.bag
+*.Identifier
+*.pth 
+*.pyc
+*.log
+*.yaml
 # Django stuff:
 *.log
 local_settings.py
