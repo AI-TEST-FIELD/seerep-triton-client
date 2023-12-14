@@ -259,8 +259,14 @@ class EvaluateInference(BaseInference):
             self.channel.request.inputs[idx].ClearField("shape")
             self.channel.request.inputs[idx].shape.extend(tmp_shape)
             self.inputs[key].shape.extend(tmp_shape)
-        
-        # Make sure the data types are correct for each input before sending them as bytes, this causes wrong array values on the server 
+        # Insert batch dimensions into the voxel coordinates------>change from N x 3 to N x 3+1. Assume batch size 1
+        tmp_data = np.zeros((self.pc['voxel_coords'].shape[0],
+                             self.pc['voxel_coords'].shape[1]+1),
+                             dtype=self.pc['voxel_coords'].dtype)
+        tmp_data[:, 1:] = self.pc['voxel_coords'].copy()
+        self.pc['voxel_coords'] = tmp_data.copy()
+        del tmp_data
+        # Make sure the data types and shapes are correct for each input before sending them as bytes, this causes wrong array values on the server 
         assert self.pc['voxels'].dtype == self.input_datatypes[self.inputs['input_0'].datatype]
         assert self.pc['voxel_coords'].dtype == self.input_datatypes[self.inputs['input_1'].datatype]
         assert self.pc['voxel_num_points'].dtype == self.input_datatypes[self.inputs['input_2'].datatype]
@@ -271,14 +277,12 @@ class EvaluateInference(BaseInference):
         self.channel.response = self.channel.do_inference() # perform the channel Inference
         box_array, scores, labels = self.client_postprocess.extract_boxes(self.channel.response)
         # indices = np.where((labels == 1))[0].tolist()
-        # indices = np.where((labels == 1) & (scores > 0.2))[0].tolist()
+        indices = np.where((labels == 2) & (scores > 0.6))[0].tolist()
         if True:
-            visualizer.draw_scenes(
-                                    points=self.pc['points'], 
-                                    ref_boxes=box_array,
-                                    ref_scores=scores,
-                                    ref_labels=labels
-                                    )                      
+            visualizer.draw_scenes(points=self.pc['points'],
+                                   ref_boxes=box_array[indices, :],
+                                   ref_scores=scores[indices],
+                                   ref_labels=labels[indices])                      
 
     def process_images(self, data, seerep_channel: seerep_channel.SEEREPChannel):
         t2 = time.time()
@@ -295,8 +299,8 @@ class EvaluateInference(BaseInference):
             for sample, idx in tqdm(zip(data, range(len(data))), 
                                     total=len(data),
                                     colour='GREEN',
-                                    desc='Sending inference request to Triton for each sample',
-                                    unit='Inference Requests',
+                                    desc='Sending inference request to Triton',
+                                    unit='requests',
                                     ascii=True):
                 # perform an inference on each image, iteratively
                 t3 = time.time()
@@ -344,8 +348,8 @@ class EvaluateInference(BaseInference):
                                 total=len(data),
                                 colour='GREEN',
                                 # file=tqdm_out,
-                                desc='Sending inference request to Triton for each sample',
-                                unit='Inference Requests'):
+                                desc='Sending inference request to Triton',
+                                unit='request'):
             # perform an inference on each image, iteratively
             t3 = time.time()
             pred = self.seerep_infer_pc(sample['point_cloud'])

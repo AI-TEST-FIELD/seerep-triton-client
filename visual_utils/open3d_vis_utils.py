@@ -45,10 +45,14 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_labels=None, ref_scor
 
     vis = open3d.visualization.Visualizer()
     vis.create_window()
-
-    vis.get_render_option().point_size = 1.0
+    ctr = vis.get_view_control()
+    open3d.utility.set_verbosity_level(open3d.utility.VerbosityLevel.Error)
+    vis.get_render_option().point_size = 1.5
     vis.get_render_option().background_color = np.zeros(3)
-
+    
+    #This line will obtain the default camera parameters .
+    camera_params = ctr.convert_to_pinhole_camera_parameters() 
+    ctr.convert_from_pinhole_camera_parameters(camera_params)
     # draw origin
     if draw_origin:
         axis_pcd = open3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
