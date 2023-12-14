@@ -16,7 +16,7 @@ import struct
 import uuid
 from tqdm import tqdm
 from copy import copy
-
+from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
 from seerep.fb import BoundingBoxes2DLabeledStamped, Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
@@ -574,14 +574,14 @@ class SEEREPChannel():
         # Collect the UUIDs and data from each sample sent by SEEREP project. 
         sample = {}
         # TODO the num_samples should be replaced by the total number of samples inside the seerep project
-        num_samples = 2
+        num_samples = 4
         for responseBuf, curr_sample in tqdm(zip(self._grpc_stub.GetPointCloud2(bytes(buf)),
                                     range(num_samples)),
                                     total=num_samples,
                                     colour='GREEN',
-                                    file=tqdm_out,
+                                    # file=tqdm_out,
                                     desc='Receiving pointclouds from the SEEREP server',
-                                    unit="samples"):
+                                    unit=" samples"):
             # logger.info('Receiving pointclouds from the SEEREP server')
             response = pc2.PointCloud2.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
@@ -634,11 +634,25 @@ class SEEREPChannel():
                 fields[field]['data'] = (np.array(strs, dtype=np.object_))
                 strs = []
             sample['point_cloud'] = copy(fields) 
-            if self.visualize:    # TODO visualize flag with open3d
+            if False:
+                from math import sin, cos
+                angle=15
                 pc = np.zeros((height*width, 3), dtype=np.float64)
                 pc[:, 0] = fields['x']['data'][:, 0]
                 pc[:, 1] = fields['y']['data'][:, 0]
                 pc[:, 2] = fields['z']['data'][:, 0]
+                ry = R.from_euler('y', 30, degrees=True).as_matrix()
+                rz = R.from_euler('z', 90, degrees=True).as_matrix()
+                rotation_matrix = np.array([[cos(angle), 0, sin(angle)], 
+                                [0, 1, 0], 
+                                [-sin(angle), 0, cos(angle)]])
+                # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509], 
+                #                             [0.01212522,  0.99957356,  0.02656451], 
+                #                             [-0.56296864, -0.01513165, 0.82633973]])
+                pc = np.matmul(ry, pc.T).T
+                pc = np.matmul(rz, pc.T).T
+                pc += [0., 0., -1.026558971]
+                # pc = r.apply(pc)
                 visualizer.draw_scenes(pc)
             # Store the sample into data collection
             data.append(sample)

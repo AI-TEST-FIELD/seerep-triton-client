@@ -16,6 +16,7 @@ from .base_inference import BaseInference
 from communicator.channel import seerep_channel
 from tools.seerep2coco import COCO_SEEREP
 from logger import Client_logger, TqdmToLogger
+from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name='Triton-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
@@ -217,13 +218,37 @@ class EvaluateInference(BaseInference):
             else:
                 return self.prediction
     
+    def rotate_pc(self, pointclouds: np.array)-> np.array:
+        tx_pc = pointclouds.copy()
+        pc = tx_pc[:, 0:3]
+        from scipy.spatial.transform import Rotation as R
+        from math import cos, sin
+        ry = R.from_euler('y', 30, degrees=True).as_matrix()
+        rz = R.from_euler('z', 90, degrees=True).as_matrix()
+        # rotation_matrix = np.array([[cos(angle), 0, sin(angle)], 
+        #                             [0, 1, 0], 
+        #                             [-sin(angle), 0, cos(angle)]])
+        # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509], 
+        #                             [0.01212522,  0.99957356,  0.02656451], 
+        #                             [-0.56296864, -0.01513165, 0.82633973]])
+        pc = np.matmul(ry, pc.T).T
+        pc = np.matmul(rz, pc.T).T
+        pc += [0., 0., -1.026558971]
+        tx_pc[:, 0:3] = pc 
+        return tx_pc
+
     def seerep_infer_pc(self, pointclouds: np.array):
         num_points = pointclouds['x']['data'].shape[0]
         # Keep only x,y,z i.e. 3 dims 
-        self.pc = np.zeros((num_points, 3), dtype=np.float32)
+        self.pc = np.zeros((num_points, 4), dtype=np.float32)
         self.pc[:, 0] = pointclouds['x']['data'][:, 0]
         self.pc[:, 1] = pointclouds['y']['data'][:, 0]
         self.pc[:, 2] = pointclouds['z']['data'][:, 0]
+        self.pc[:, 3] = pointclouds['intensity']['data'][:, 0]
+        self.pc = self.rotate_pc(self.pc)
+        # DEBUG only
+        # with open('000076.bin', 'rb') as f:
+        #     self.pc = np.fromfile(f, dtype=np.float32).reshape(-1, 4)
         self.pc = self.client_preprocess.filter_pc(self.pc)
         num_voxels = self.pc['voxels'].shape[0]
         self.channel.request.ClearField("raw_input_contents")  # Flush the previous sample content
@@ -244,42 +269,16 @@ class EvaluateInference(BaseInference):
                                                         self.pc['voxel_num_points'].tobytes(),
                                                         ])
         self.channel.response = self.channel.do_inference() # perform the channel Inference
-        self.output = self.client_postprocess.extract_boxes(self.channel.response)
-        box_array = self.output['pred_boxes']
-        scores = self.output['pred_scores']
-        labels = self.output['pred_labels']
-        # class ID 2 corresponds to pedestrians 
-        # indices = np.where((labels == 2) & (scores > 0.2))[0].tolist()
-        indices = np.where((labels == 2) & (scores > 0.5))[0].tolist()
-        # print(np.unique(labels))
-
-        detection_array = Detection3DArray()
-        # for idx in indices:
-        for idx in range(len(box_array)):
-            detection = Detection3D()
-            bbox3D = BoundingBox3D()
-            object_hypothesis = ObjectHypothesisWithPose()
-            bbox3D.center.position.x = box_array[idx, 0]
-            bbox3D.center.position.y = box_array[idx, 1]
-            bbox3D.center.position.z = box_array[idx, 2]
-            q = self.yaw2quaternion(float(box_array[idx, 8]))
-            bbox3D.center.orientation.w = q[0]
-            bbox3D.center.orientation.x = q[1]
-            bbox3D.center.orientation.y = q[2]
-            bbox3D.center.orientation.z = q[3]
-            bbox3D.size.x = box_array[idx, 4]
-            bbox3D.size.y = box_array[idx, 3]
-            bbox3D.size.z = box_array[idx, 5] 
-            object_hypothesis.score = copy(scores[idx])
-            object_hypothesis.id = copy(labels[idx])
-            detection.bbox = bbox3D
-            bbox3D = None   #Flush 
-            detection.header = msg.header
-            detection.results.append(object_hypothesis)
-            object_hypothesis = None # Flush
-            detection_array.detections.append(detection)
-            detection = None    #Flush
-            t2 = time.time()
+        box_array, scores, labels = self.client_postprocess.extract_boxes(self.channel.response)
+        # indices = np.where((labels == 1))[0].tolist()
+        # indices = np.where((labels == 1) & (scores > 0.2))[0].tolist()
+        if True:
+            visualizer.draw_scenes(
+                                    points=self.pc['points'], 
+                                    ref_boxes=box_array,
+                                    ref_scores=scores,
+                                    ref_labels=labels
+                                    )                      
 
     def process_images(self, data, seerep_channel: seerep_channel.SEEREPChannel):
         t2 = time.time()
@@ -344,7 +343,7 @@ class EvaluateInference(BaseInference):
         for sample, idx in tqdm(zip(data, range(len(data))), 
                                 total=len(data),
                                 colour='GREEN',
-                                file=tqdm_out,
+                                # file=tqdm_out,
                                 desc='Sending inference request to Triton for each sample',
                                 unit='Inference Requests'):
             # perform an inference on each image, iteratively
@@ -358,24 +357,24 @@ class EvaluateInference(BaseInference):
             labels = []
             confidences = []
             # traverse the predictions for the current pointclouds
-            for obj in range(len(pred[1])):
-                pass
-            if self.viz:
-                pass
+            # for obj in range(len(pred[1])):
+            #     pass
+            # if self.viz:
+            #     pass
             # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
             # TODO run evaluation without inference call
             # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
             # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
         # Convert groundtruth and predictions to PyCOCO format for evaluation
-        logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
-        t5 = time.time()
-        coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
-        cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
-        cocoEval.evaluate()
-        cocoEval.accumulate()
-        cocoEval.summarize()
-        t6 = time.time()
-        logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
+        # logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
+        # t5 = time.time()
+        # coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
+        # cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
+        # cocoEval.evaluate()
+        # cocoEval.accumulate()
+        # cocoEval.summarize()
+        # t6 = time.time()
+        # logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
 
     def start_inference(self, model_name, format='coco'):
         schan = seerep_channel.SEEREPChannel(project_name=self.args.seerep_project,
