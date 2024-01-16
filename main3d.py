@@ -18,6 +18,7 @@ clients = {
     'retinanet_coco':FCOS_client,
     'retina_big':FCOS_client,
     'second_iou':Pointpillars_client,
+    'pointpillar_kitti':Pointpillars_client,
     # more clients can be added
 }
 
