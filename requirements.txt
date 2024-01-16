@@ -2,14 +2,13 @@ seerep_grpc
 pycocotools>=2.0.6
 fast-coco-eval
 tritonclient[all]
-opencv-python<=4.8.0.74
+opencv-python<=4.7.0.72
 opencv-contrib-python<=4.7.0.72
 torchvision>=0.14.0
 imutils 
 # 3D inference with OpenPCDet 
 pyquaternion
 easydict
-pyquaternion
 pyyaml
 kornia==0.6.8
 av2
