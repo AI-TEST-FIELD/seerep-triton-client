@@ -214,8 +214,6 @@ class SEEREPChannel():
                     if response.Projects(i).Name().decode("utf-8") == projname:
                         projectuuid = response.Projects(i).Uuid().decode("utf-8")
                         curr_proj = tmp
-                    else:
-                        logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
                 except Exception as e:
                     logger.error(e)
             else:
@@ -224,7 +222,7 @@ class SEEREPChannel():
                 except Exception as e:
                     logger.error(e)
         if curr_proj == None:
-            logger.error("No SEEREP projects found on the server. Please check the SEEREP server host!")
+            logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
             sys.exit(0)
         else:
             logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
