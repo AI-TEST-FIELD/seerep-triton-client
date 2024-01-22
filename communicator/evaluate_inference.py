@@ -244,8 +244,9 @@ class EvaluateInference(BaseInference):
         self.pc[:, 0] = pointclouds['x']['data'][:, 0]
         self.pc[:, 1] = pointclouds['y']['data'][:, 0]
         self.pc[:, 2] = pointclouds['z']['data'][:, 0]
-        self.pc[:, 3] = pointclouds['intensity']['data'][:, 0]
-        self.pc = self.rotate_pc(self.pc)
+        self.pc[:, 3] = pointclouds['intensity']['data'][:, 0] / np.max(pointclouds['intensity']['data'][:, 0])
+        # self.pc[:, 3] = pointclouds['intensity']['data'][:, 0]
+        # self.pc = self.rotate_pc(self.pc)
         # DEBUG only
         # with open('000076.bin', 'rb') as f:
         #     self.pc = np.fromfile(f, dtype=np.float32).reshape(-1, 4)
@@ -276,8 +277,9 @@ class EvaluateInference(BaseInference):
                                                         ])
         self.channel.response = self.channel.do_inference() # perform the channel Inference
         box_array, scores, labels = self.client_postprocess.extract_boxes(self.channel.response)
-        # indices = np.where((labels == 1))[0].tolist()
-        indices = np.where((labels == 2) & (scores > 0.6))[0].tolist()
+        # Show only persons above given confidence threshold
+        indices = np.where((labels == 2) & (scores > 0.4))[0].tolist()
+        # indices = [i for i in range(len(labels))]
         if True:
             visualizer.draw_scenes(points=self.pc['points'],
                                    ref_boxes=box_array[indices, :],

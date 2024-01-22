@@ -37,7 +37,7 @@ class PCDetPreprocess(Preprocess):
         
         data_dict = {
             'points': pointcloud_array,
-            'frame_id': 1,
+            'frame_id': 0,
         }
 
         data_dict = self.point_feature_encoder.forward(data_dict)
