@@ -60,14 +60,15 @@ def pcd_numpy_to_o3d(
     return out_pcd
 
 
-def transform_pcd_to_base_frame(
+def transform_pcd_to_kitti_frame(
     o3d_pcd: o3d.t.geometry.PointCloud,
 ) -> o3d.t.geometry.PointCloud:
     kitti_translation = o3d.core.Tensor([0.0, 0.0, -1.026558971], device=O3D_DEVICE)
+    
     return o3d_pcd.translate(kitti_translation)
 
 
-def transform_pcd_to_kitti_frame(
+def transform_pcd_to_base_frame(
     o3d_pcd: o3d.t.geometry.PointCloud,
 ) -> o3d.t.geometry.PointCloud:
     base_transform = o3d.core.Tensor(

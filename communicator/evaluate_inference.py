@@ -224,27 +224,22 @@ class EvaluateInference(BaseInference):
             else:
                 return self.prediction
     
-    def rotate_pc(self, pointclouds: np.array)-> np.array:
-        tx_pc = pointclouds.copy()
-        pc = tx_pc[:, 0:3]
-        from scipy.spatial.transform import Rotation as R
-        from math import cos, sin
-        ry = R.from_euler('y', 30, degrees=True).as_matrix()
-        rz = R.from_euler('z', 90, degrees=True).as_matrix()
-        # rotation_matrix = np.array([[cos(angle), 0, sin(angle)], 
-        #                             [0, 1, 0], 
-        #                             [-sin(angle), 0, cos(angle)]])
-        # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509], 
-        #                             [0.01212522,  0.99957356,  0.02656451], 
-        #                             [-0.56296864, -0.01513165, 0.82633973]])
-        pc = np.matmul(ry, pc.T).T
-        pc = np.matmul(rz, pc.T).T
-        pc += [0., 0., -1.026558971]
-        tx_pc[:, 0:3] = pc 
-        return tx_pc
+    def rotate_pc(self, pointclouds: np.array, sensor_name: str) -> np.ndarray:
+        np_pcd = None
+
+        if sensor_name == 'ouster':
+            pass
+        elif sensor_name == 'robosense':
+            pass
+        elif sensor_name == 'velodyne':
+            pass
+        else:
+            raise NotImplementedError
+        
+
+        return np_pcd
 
     def seerep_infer_pc(self, pointclouds: np.array):
-        
         num_points = pointclouds['x']['data'].shape[0]
         # Keep only x,y,z i.e. 3 dims 
         self.pc = np.zeros((num_points, 4), dtype=np.float32)
@@ -259,7 +254,7 @@ class EvaluateInference(BaseInference):
         #     self.pc = np.fromfile(f, dtype=np.float32).reshape(-1, 4)
 
         self.pc = janosch_pcd_magic(client_pcd=self.pc,
-                                    triton_inference=True)
+                                    triton_inference=False)
 
         self.pc = self.client_preprocess.filter_pc(self.pc)
         num_voxels = self.pc['voxels'].shape[0]
