@@ -54,7 +54,7 @@
                 // "--channel-seerep", "localhost:9090",
                 "-cT", "10.249.6.23:8001",
                 "-cS", "agrigaia-ur.ni.dfki:9090",
-                "--seerep-project", "testproject",
+                "--seerep-project", "AI-TEST-FIELD",
                 "--model-name", "second_iou",
                 // "--model-name", "pointpillar_kitti",
                 "--log-level", "info",

@@ -8,9 +8,12 @@ import logging
 from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
+import open3d as o3d
 
 from tritonclient.grpc import service_pb2, service_pb2_grpc
 import tritonclient.grpc.model_config_pb2 as mc
+
+from tools.pointcloud import janosch_pcd_magic
 from .channel import grpc_channel
 from .base_inference import BaseInference
 from communicator.channel import seerep_channel
@@ -20,6 +23,9 @@ from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name='Triton-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
+
+
+counter = 0
 
 class EvaluateInference(BaseInference):
 
@@ -238,18 +244,23 @@ class EvaluateInference(BaseInference):
         return tx_pc
 
     def seerep_infer_pc(self, pointclouds: np.array):
+        
         num_points = pointclouds['x']['data'].shape[0]
         # Keep only x,y,z i.e. 3 dims 
         self.pc = np.zeros((num_points, 4), dtype=np.float32)
         self.pc[:, 0] = pointclouds['x']['data'][:, 0]
         self.pc[:, 1] = pointclouds['y']['data'][:, 0]
         self.pc[:, 2] = pointclouds['z']['data'][:, 0]
-        self.pc[:, 3] = pointclouds['intensity']['data'][:, 0] / np.max(pointclouds['intensity']['data'][:, 0])
+        self.pc[:, 3] = pointclouds['reflectivity']['data'][:, 0]
         # self.pc[:, 3] = pointclouds['intensity']['data'][:, 0]
         # self.pc = self.rotate_pc(self.pc)
         # DEBUG only
         # with open('000076.bin', 'rb') as f:
         #     self.pc = np.fromfile(f, dtype=np.float32).reshape(-1, 4)
+
+        self.pc = janosch_pcd_magic(client_pcd=self.pc,
+                                    triton_inference=True)
+
         self.pc = self.client_preprocess.filter_pc(self.pc)
         num_voxels = self.pc['voxels'].shape[0]
         self.channel.request.ClearField("raw_input_contents")  # Flush the previous sample content
@@ -280,6 +291,7 @@ class EvaluateInference(BaseInference):
         # Show only persons above given confidence threshold
         indices = np.where((labels == 2) & (scores > 0.4))[0].tolist()
         # indices = [i for i in range(len(labels))]
+
         if True:
             visualizer.draw_scenes(points=self.pc['points'],
                                    ref_boxes=box_array[indices, :],
