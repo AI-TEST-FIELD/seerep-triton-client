@@ -59,6 +59,27 @@ def pcd_numpy_to_o3d(
 
     return out_pcd
 
+def pcd_ros_to_o3d(ros_pcd, feature_field: str) -> o3d.t.geometry.PointCloud:
+
+    tmp_positions = np.zeros((ros_pcd["x"]["data"].shape[0], 3), dtype=np.float32)
+    tmp_positions[:, 0] = ros_pcd["x"]["data"][:, 0]
+    tmp_positions[:, 1] = ros_pcd["y"]["data"][:, 0]
+    tmp_positions[:, 2] = ros_pcd["z"]["data"][:, 0]
+
+    out_pcd = o3d.t.geometry.PointCloud(device=O3D_DEVICE)
+    out_pcd.point["positions"] = o3d.core.Tensor(
+        tmp_positions, device=O3D_DEVICE, dtype=o3d.core.Dtype.Float32
+    )
+    
+    out_pcd.point[feature_field] = o3d.core.Tensor(
+        ros_pcd[feature_field]["data"],
+        device=O3D_DEVICE,
+        dtype=o3d.core.Dtype.Float32,
+    )
+
+    return out_pcd
+
+
 
 def transform_pcd_to_kitti_frame(
     o3d_pcd: o3d.t.geometry.PointCloud,
@@ -71,6 +92,7 @@ def transform_pcd_to_kitti_frame(
 def transform_pcd_to_base_frame(
     o3d_pcd: o3d.t.geometry.PointCloud,
 ) -> o3d.t.geometry.PointCloud:
+    "Ouster specific"
     base_transform = o3d.core.Tensor(
         [
             [0.82638931, -0.02497454, 0.56254509, 0.191287],
