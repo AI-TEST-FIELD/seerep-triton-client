@@ -26,10 +26,7 @@ from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
-
-
 O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
-counter = 0
 
 
 class EvaluateInference(BaseInference):
@@ -285,7 +282,7 @@ class EvaluateInference(BaseInference):
                 "robosense": [],
             },
             "dataset_translation": {
-                "kitti": [0.0, 0.0, -1.026558971], 
+                "kitti": [0.0, 0.0, -1.026558971],
                 "coco": [],
             },
         }
@@ -322,9 +319,7 @@ class EvaluateInference(BaseInference):
 
     def seerep_infer_pc(self, pointclouds: np.array):
         self.preprocess_pc(
-            ros_pcd=pointclouds, 
-            sensor_name='ouster',
-            dataset_name='kitti'
+            ros_pcd=pointclouds, sensor_name="ouster", dataset_name="kitti"
         )
 
         self.pc = self.client_preprocess.filter_pc(self.pc)
