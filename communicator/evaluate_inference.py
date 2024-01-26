@@ -14,8 +14,6 @@ from tritonclient.grpc import service_pb2, service_pb2_grpc
 import tritonclient.grpc.model_config_pb2 as mc
 
 from tools.pointcloud import (
-    janosch_pcd_magic,
-    pcd_numpy_to_o3d,
     pcd_o3d_to_numpy,
     pcd_ros_to_o3d,
 )
@@ -267,6 +265,7 @@ class EvaluateInference(BaseInference):
         Args:
             ros_pcd : Point cloud as Datastructure generated from ros message.
             sensor_name : Sensor specific name tag associated with the point cloud.
+            dataset_name : The name of the dataset used for training of the object detector.
 
         Return:
             preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
@@ -275,7 +274,7 @@ class EvaluateInference(BaseInference):
 
         # dictionary for sensor and dataset transformations
         TRANSFORM_DICT = {
-            "base_transformations": {
+            "base_transformation": {
                 "ouster": [
                     [0.82638931, -0.02497454, 0.56254509, 0.191287],
                     [0.01212522, 0.99957356, 0.02656451, -0.35169424],
@@ -298,10 +297,10 @@ class EvaluateInference(BaseInference):
 
         # sensor and data specific params
         sensor_to_robot_base_transform = o3d.core.Tensor(
-            TRANSFORM_DICT["base_transformations"][sensor_name], device=O3D_DEVICE
+            TRANSFORM_DICT["base_transformation"][sensor_name], device=O3D_DEVICE
         )
         robot_base_to_train_dataset_translation = o3d.core.Tensor(
-            TRANSFORM_DICT["base_transformations"][dataset_name], device=O3D_DEVICE
+            TRANSFORM_DICT["dataset_translation"][dataset_name], device=O3D_DEVICE
         )
         feature_field = (
             "reflectivity" if sensor_name in REFLECTIVITY_SENSORS else "intensity"
@@ -322,7 +321,11 @@ class EvaluateInference(BaseInference):
         return preprocessed_np_pcd
 
     def seerep_infer_pc(self, pointclouds: np.array):
-        self.preprocess_pc()
+        self.preprocess_pc(
+            ros_pcd=pointclouds, 
+            sensor_name='ouster',
+            dataset_name='kitti'
+        )
 
         self.pc = self.client_preprocess.filter_pc(self.pc)
         num_voxels = self.pc["voxels"].shape[0]

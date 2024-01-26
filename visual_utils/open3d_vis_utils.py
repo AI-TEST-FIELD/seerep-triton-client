@@ -8,8 +8,6 @@ import open3d
 import matplotlib
 import numpy as np
 
-from tools.bbox import janosch_bbox_magic
-
 box_colormap = [
     [1, 1, 1],
     [0, 1, 0],
