@@ -71,11 +71,6 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_labels=None, ref_scor
         vis = draw_box(vis, gt_boxes, (0, 0, 1))
 
     if ref_boxes is not None:
-        print('Box Dimensions: ', ref_boxes)
-        # linesets_bboxes, _ = janosch_bbox_magic(orig_bboxes=ref_boxes)
-        # for lineset_bbox in linesets_bboxes:
-        #     vis.add_geometry(lineset_bbox)
-
         vis = draw_box(vis, ref_boxes, (0, 1, 0), ref_labels, ref_scores)
 
     vis.run()
@@ -112,7 +107,6 @@ def translate_boxes_to_open3d_instance(gt_boxes):
 def draw_box(vis, gt_boxes, color=(0, 1, 0), ref_labels=None, score=None):
     for i in range(gt_boxes.shape[0]):
         line_set, box3d = translate_boxes_to_open3d_instance(gt_boxes[i])
-        
         if ref_labels is None:
             line_set.paint_uniform_color(color)
         else:
