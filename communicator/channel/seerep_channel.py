@@ -19,15 +19,13 @@ from copy import copy
 from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
+
 from seerep.fb import BoundingBoxes2DLabeledStamped, Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
 from seerep.fb import PointCloud2 as pc2
-
 from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
 from seerep.fb import meta_operations_grpc_fb as metaOperations
-# from seerep.util.fb_helper import rosToNumpyDtype
-
-import communicator.channel.util_fb as util_fb
+from seerep.util import fb_helper as util_fb
 from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
@@ -201,32 +199,42 @@ class SEEREPChannel():
         emptyMsg = Empty.End(self._builder)
         self._builder.Finish(emptyMsg)
         buf = self._builder.Output()
-
+        projects = {}
         responseBuf = self._grpc_stubmeta.GetProjects(bytes(buf))
         response = ProjectInfos.ProjectInfos.GetRootAs(responseBuf)
         curr_proj = None
+        duplicate = False
         logger.info("List of available projects on the SEEREP Server")
         for i in range(response.ProjectsLength()):
             if log==True:
                 try:
                     tmp = response.Projects(i).Name().decode("utf-8")
-                    logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
-                    if response.Projects(i).Name().decode("utf-8") == projname:
-                        projectuuid = response.Projects(i).Uuid().decode("utf-8")
-                        curr_proj = tmp
+                    if tmp in projects:
+                        logger.info(tmp+'_2' + " " + response.Projects(i).Uuid().decode("utf-8"))
+                        logger.warning('Found multiple projects with same project name but with different UUIDs! Please check SEEREP Server!')
+                        projects[tmp+'_2'] = response.Projects(i).Uuid().decode("utf-8")
+                        duplicate = True
+                    else:
+                        logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
+                        projects[tmp] = response.Projects(i).Uuid().decode("utf-8")                
+                    # if response.Projects(i).Name().decode("utf-8") == projname:
+                    #     curr_proj = tmp
+                    #     projectuuid = response.Projects(i).Uuid().decode("utf-8")
                 except Exception as e:
                     logger.error(e)
-            else:
-                try:
-                    projectuuid = response.Projects(i).Uuid().decode("utf-8")
-                except Exception as e:
-                    logger.error(e)
-        if curr_proj == None:
+            # else:
+            #     try:
+            #         projectuuid = response.Projects(i).Uuid().decode("utf-8")
+            #     except Exception as e:
+            #         logger.error(e)
+        if projname in projects:
+            curr_proj = projname
+            projectuuid = projects[curr_proj]
+            logger.warning("Found project {} with UUID: {}".format(curr_proj, projectuuid))
+            return projectuuid
+        else:
             logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
             sys.exit(0)
-        else:
-            logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
-            return projectuuid
 
     def string_to_fbmsg (self, projectuuid):
         projectuuidString = self._builder.CreateString(projectuuid)
@@ -564,6 +572,7 @@ class SEEREPChannel():
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
             withoutData=False,
+            sortByTime=True,  # from version 0.2.5 onwards
         )
         self._builder.Finish(queryMsg)
         buf = self._builder.Output()
@@ -572,7 +581,7 @@ class SEEREPChannel():
         # Collect the UUIDs and data from each sample sent by SEEREP project. 
         sample = {}
         # TODO the num_samples should be replaced by the total number of samples inside the seerep project
-        num_samples = 4
+        num_samples = 100
         for responseBuf, curr_sample in tqdm(zip(self._grpc_stub.GetPointCloud2(bytes(buf)),
                                     range(num_samples)),
                                     total=num_samples,
