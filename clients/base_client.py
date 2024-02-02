@@ -43,11 +43,10 @@ class Client(ABC):
         # if len(model_metadata.outputs) != 1:
         #     raise Exception("expecting 1 output, got {}".format(
         #         len(model_metadata.outputs)))
-
-        if len(model_config.input) != 1:
-            raise Exception(
-                "expecting 1 input in model configuration, got {}".format(
-                    len(model_config.input)))
+        # if len(model_config.input) != 1:
+        #     raise Exception(
+        #         "expecting 1 input in model configuration, got {}".format(
+        #             len(model_config.input)))
 
         input_metadata = model_metadata.inputs[0]
         input_config = model_config.input[0]
@@ -102,7 +101,13 @@ class Client(ABC):
             h = input_metadata.shape[2 if input_batch_dim else 1]
             w = input_metadata.shape[3 if input_batch_dim else 2]
 
-        return (input_metadata.name, [output.name for output in output_metadata], c, h, w,
-                input_config.format, input_metadata.datatype)
-
+        input_metadata = [{'name': input.name, 
+                           'shape': input.shape,
+                           'dtype': input.datatype} for input in model_metadata.inputs]
+        output_metadata = [{'name': output.name, 
+                           'shape': output.shape,
+                           'dtype': output.datatype} for output in model_metadata.outputs]
+        # return (input_metadata.name, [output.name for output in output_metadata], c, h, w,
+        #         input_config.format, input_metadata.datatype)
+        return (input_metadata, output_metadata)
 

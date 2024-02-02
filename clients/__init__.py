@@ -6,6 +6,6 @@ from .detrex_client import Detrex_client
 from .postprocess import *
 from .preprocess import *
 try:
-    from .pcdet_client import Pointpillars_client
+    from .pcdet_client import PCDet_client
 except Exception as e:
     logging.error(e)

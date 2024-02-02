@@ -2,7 +2,7 @@ from .base_client import Client
 from .preprocess import PCDetPreprocess
 from .postprocess import PCDetPostprocess
 
-class Pointpillars_client(Client):
+class PCDet_client(Client):
     """
 
     """
