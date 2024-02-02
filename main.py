@@ -73,7 +73,14 @@ def parse_args():
                         '--visualize',
                         action='store_true',
                         required=False,
-                        help='Visualize images')
+                        help='Visualize images'),
+    parser.add_argument('-d',
+                        '--mode',
+                        type=str,
+                        required=False,
+                        default='images',
+                        choices=['images', 'pointclouds'],
+                        help='Data modality on which we want to perform inference. Default is images.')
     parser.add_argument('-s',
                         '--semantics',
                         nargs='+',
@@ -96,5 +103,5 @@ if __name__ == '__main__':
     channel = grpc_channel.GRPCChannel(FLAGS)
 
     #define inference
-    evaluation = EvaluateInference(FLAGS, channel, client, format=format)
-    evaluation.start_inference(FLAGS.model_name)
+    evaluation = EvaluateInference(args=FLAGS, channel=channel, client=client, format=format)
+    evaluation.start_inference(model_name=FLAGS.model_name, modality=FLAGS.mode)

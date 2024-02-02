@@ -26,7 +26,7 @@ from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
 from seerep.fb import meta_operations_grpc_fb as metaOperations
 from seerep.util import fb_helper as util_fb
-from visual_utils import open3d_vis_utils as visualizer
+# from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
@@ -384,17 +384,10 @@ class SEEREPChannel():
         for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
             print('[INFO] Receiving images . . .')
             response = Image.Image.GetRootAs(responseBuf)
-
             # this should not be inside the loop
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
             sample['uuid'] = self._msguuid
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), 3))
-
-            # Uncomment to visualize images
-            # import matplotlib.pyplot as plt
-            # plt.imshow(np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), 3)))
-            # plt.show()
-            # TODO why are the bounding boxes empty?????
             nbbs = response.LabelsBbLength()
             sample['boxes'] = nbbs
             for category in range(response.LabelsBbLength()):
@@ -483,12 +476,17 @@ class SEEREPChannel():
             logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
+            # response.Header().Stamp().Seconds()
+            # response.Header().Stamp().Nanos()
             sample['uuid'] = self._msguuid
-            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1)) # When more than 3 channels
-            if sample['image'].shape[2] == 4:
-                tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGBA2BGRA)
-            elif sample['image'].shape[2] == 3:
-                tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
+            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
+            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8)
+            tmp = sample['image']
+            # if sample['image'].shape[2] == 4:
+            #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_A2BGR)
+            #     # tmp = tmp[:, :, 0:3]    # ignore last channel for visualization
+            # elif sample['image'].shape[2] == 3:
+            #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
             sample['boxes'] = []
             # for category in range(response.LabelsBbLength()):
             for j in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):

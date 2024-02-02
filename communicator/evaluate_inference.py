@@ -8,25 +8,25 @@ import logging
 from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-import open3d as o3d
+# import open3d as o3d
 
 from tritonclient.grpc import service_pb2, service_pb2_grpc
 import tritonclient.grpc.model_config_pb2 as mc
 
-from tools.pointcloud import (
-    pcd_o3d_to_numpy,
-    pcd_ros_to_o3d,
-)
+# from tools.pointcloud import (
+#     pcd_o3d_to_numpy,
+#     pcd_ros_to_o3d,
+# )
 from .channel import grpc_channel
 from .base_inference import BaseInference
 from communicator.channel import seerep_channel
 from tools.seerep2coco import COCO_SEEREP
 from logger import Client_logger, TqdmToLogger
-from visual_utils import open3d_vis_utils as visualizer
+# from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
-O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
+# O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
 
 
 class EvaluateInference(BaseInference):
@@ -105,14 +105,14 @@ class EvaluateInference(BaseInference):
         # self.channel.input.name, output_name, c, h, w, format, self.channel.input.datatype = self.client.parse_model(
         #     meta_data["metadata_response"], meta_data["config_response"].config)
 
-        input_metadata, output_metadata = self.client.parse_model(
+        self.input_metadata, self.output_metadata = self.client.parse_model(
             meta_data["metadata_response"], meta_data["config_response"].config
         )
-        self.channel.input = [input["name"] for input in input_metadata]
-        self.channel.output = [output["name"] for output in output_metadata]
+        self.channel.input = [input["name"] for input in self.input_metadata]
+        self.channel.output = [output["name"] for output in self.output_metadata]
 
         self.inputs = {}
-        for input, i in zip(input_metadata, range(len(input_metadata))):
+        for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
             self.inputs[
                 "input_{}".format(i)
             ] = service_pb2.ModelInferRequest().InferInputTensor()
@@ -125,7 +125,7 @@ class EvaluateInference(BaseInference):
             self.channel.request.inputs.extend([self.inputs["input_{}".format(i)]])
 
         self.outputs = {}
-        for output, i in zip(output_metadata, range(len(output_metadata))):
+        for output, i in zip(self.output_metadata, range(len(self.output_metadata))):
             self.outputs[
                 "output_{}".format(i)
             ] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
@@ -164,7 +164,7 @@ class EvaluateInference(BaseInference):
         # cv_image = cv2.resize(cv_image, (self.channel.input.shape[2], self.channel.input.shape[1]))
         tmp = image.copy()
         s_h, s_w = image.shape[0], image.shape[1]
-        n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
+        n_h, n_w = self.input_metadata[0]['shape'][1], self.input_metadata[0]['shape'][2]
         if s_w > s_h:
             # same aspect ratio
             padded_image = np.zeros((n_h, n_w, 3), dtype=np.uint8)
@@ -191,44 +191,46 @@ class EvaluateInference(BaseInference):
         self.orig_size = cv_image.shape[0:2]
         self.orig_image = cv_image.copy()
         s_h, s_w = cv_image.shape[0], cv_image.shape[1]
-        n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
+        # n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
         cv_image, r_h, r_w = self.resize(cv_image)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
-        # cv2.waitKey()
+        # cv2.waitKey(0)
         # cv2.destroyWindow(named_window)
         tmp = cv_image.copy()
         self.image = self.client_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
         self.image = self.image.astype(
-            self.input_datatypes[self.channel.input.datatype]
+            self.input_datatypes[self.input_metadata[0]['dtype']]
         )
         if self.image is not None:
             self.channel.request.ClearField("inputs")
-            self.channel.request.ClearField(
-                "raw_input_contents"
-            )  # Flush the previous image contents
-            self.channel.request.inputs.extend([self.channel.input])
+            self.channel.request.ClearField("raw_input_contents")  # Flush the previous image contents
+            self.channel.request.inputs.extend([self.inputs['input_0']])
             self.channel.request.raw_input_contents.extend([self.image.tobytes()])
             self.channel.response = self.channel.do_inference()  # Inference
             self.prediction = self.client_postprocess.extract_boxes(
                 self.channel.response
             )
+            filter_classes = np.where(self.prediction[1] == 0)[0]
+            self.prediction[0] = self.prediction[0][filter_classes, :]
+            self.prediction[1] = self.prediction[1][filter_classes]
+            self.prediction[2] = self.prediction[2][filter_classes]
             if len(self.prediction[1]) > 0:
-                if self.viz:
-                    tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
-                    for box in self.prediction[0]:
-                        cv2.rectangle(
-                            tmp,
-                            (int(box[0]), int(box[1])),
-                            (int(box[2]), int(box[3])),
-                            (255, 0, 0),
-                            2,
-                        )
-                    named_window = "Resized source image with prediction"
-                    cv2.imshow(named_window, tmp)
-                    cv2.waitKey()
-                    cv2.destroyWindow(named_window)
+                # if self.viz:
+                #     # tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
+                #     for box in self.prediction[0]:
+                #         cv2.rectangle(
+                #             tmp,
+                #             (int(box[0]), int(box[1])),
+                #             (int(box[2]), int(box[3])),
+                #             (255, 0, 0),
+                #             2,
+                #         )
+                #     named_window = "Resized source image with prediction"
+                #     cv2.imshow(named_window, tmp)
+                #     cv2.waitKey()
+                #     cv2.destroyWindow(named_window)
                 self.prediction[0] = self._scale_box_array(
                     self.prediction[0], source_dim=(r_h, r_w), padded=True
                 )
@@ -251,82 +253,80 @@ class EvaluateInference(BaseInference):
             else:
                 return self.prediction
 
-    def preprocess_pc(self, ros_pcd, sensor_name: str, dataset_name: str) -> np.ndarray:
-        """
-        Processing Steps:
-            1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
-            2. Translate Point Cloud into the Dataset specific detector training dataset frame. Adjusts the Point Cloud to mimic the relative Lidar position from the detectors training dataset.
-            3. Normalize feature field [0, 1], by maximal possible feature value (reflectance/intensity = 255).
+    # def preprocess_pc(self, ros_pcd, sensor_name: str, dataset_name: str) -> np.ndarray:
+    #     """
+    #     Processing Steps:
+    #         1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
+    #         2. Translate Point Cloud into the Dataset specific detector training dataset frame. Adjusts the Point Cloud to mimic the relative Lidar position from the detectors training dataset.
+    #         3. Normalize feature field [0, 1], by maximal possible feature value (reflectance/intensity = 255).
 
 
-        Args:
-            ros_pcd : Point cloud as Datastructure generated from ros message.
-            sensor_name : Sensor specific name tag associated with the point cloud.
-            dataset_name : The name of the dataset used for training of the object detector.
+    #     Args:
+    #         ros_pcd : Point cloud as Datastructure generated from ros message.
+    #         sensor_name : Sensor specific name tag associated with the point cloud.
+    #         dataset_name : The name of the dataset used for training of the object detector.
 
-        Return:
-            preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
+    #     Return:
+    #         preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
 
-        """
+    #     """
 
-        # dictionary for sensor and dataset transformations
-        TRANSFORM_DICT = {
-            "base_transformation": {
-                "ouster": [
-                    [0.82638931, -0.02497454, 0.56254509, 0.191287],
-                    [0.01212522, 0.99957356, 0.02656451, -0.35169424],
-                    [-0.56296864, -0.01513165, 0.82633973, 1.90064396],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                "velodyne": [],
-                "robosense": [],
-            },
-            "dataset_translation": {
-                "kitti": [0.0, 0.0, -1.026558971],
-                "coco": [],
-            },
-        }
+    #     # dictionary for sensor and dataset transformations
+    #     TRANSFORM_DICT = {
+    #         "base_transformation": {
+    #             "ouster": [
+    #                 [0.82638931, -0.02497454, 0.56254509, 0.191287],
+    #                 [0.01212522, 0.99957356, 0.02656451, -0.35169424],
+    #                 [-0.56296864, -0.01513165, 0.82633973, 1.90064396],
+    #                 [0.0, 0.0, 0.0, 1.0],
+    #             ],
+    #             "velodyne": [],
+    #             "robosense": [],
+    #         },
+    #         "dataset_translation": {
+    #             "kitti": [0.0, 0.0, -1.026558971],
+    #             "coco": [],
+    #         },
+    #     }
 
-        # lidar sensors which use the reflectivity field instead of intensity
-        REFLECTIVITY_SENSORS = ["ouster"]
+    #     # lidar sensors which use the reflectivity field instead of intensity
+    #     REFLECTIVITY_SENSORS = ["ouster"]
 
-        MAX_FEATURE_VALUE = 255
+    #     MAX_FEATURE_VALUE = 255
 
-        # sensor and data specific params
-        sensor_to_robot_base_transform = o3d.core.Tensor(
-            TRANSFORM_DICT["base_transformation"][sensor_name], device=O3D_DEVICE
-        )
-        robot_base_to_train_dataset_translation = o3d.core.Tensor(
-            TRANSFORM_DICT["dataset_translation"][dataset_name], device=O3D_DEVICE
-        )
-        feature_field = (
-            "reflectivity" if sensor_name in REFLECTIVITY_SENSORS else "intensity"
-        )
+    #     # sensor and data specific params
+    #     sensor_to_robot_base_transform = o3d.core.Tensor(
+    #         TRANSFORM_DICT["base_transformation"][sensor_name], device=O3D_DEVICE
+    #     )
+    #     robot_base_to_train_dataset_translation = o3d.core.Tensor(
+    #         TRANSFORM_DICT["dataset_translation"][dataset_name], device=O3D_DEVICE
+    #     )
+    #     feature_field = (
+    #         "reflectivity" if sensor_name in REFLECTIVITY_SENSORS else "intensity"
+    #     )
 
-        # preprocessing steps
-        raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=ros_pcd, feature_field=feature_field)
-        preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
-        preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
-            robot_base_to_train_dataset_translation
-        )
-        preprocessed_np_pcd = pcd_o3d_to_numpy(
-            o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
-        )
-        preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
+    #     # preprocessing steps
+    #     # raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=ros_pcd, feature_field=feature_field)
+    #     preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
+    #     preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
+    #         robot_base_to_train_dataset_translation
+    #     )
+    #     preprocessed_np_pcd = pcd_o3d_to_numpy(
+    #         o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
+    #     )
+    #     preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
 
-        self.pc = preprocessed_np_pcd
-        return preprocessed_np_pcd
+    #     self.pc = preprocessed_np_pcd
+    #     return preprocessed_np_pcd
 
     def seerep_infer_pc(self, pointclouds: np.array):
         self.preprocess_pc(
-            ros_pcd=pointclouds, sensor_name="ouster", dataset_name="kitti"
+            ros_pcd=pointclouds, sensor_name="velodyne", dataset_name="kitti"
         )
 
         self.pc = self.client_preprocess.filter_pc(self.pc)
         num_voxels = self.pc["voxels"].shape[0]
-        self.channel.request.ClearField(
-            "raw_input_contents"
-        )  # Flush the previous sample content
+        self.channel.request.ClearField("raw_input_contents")  # Flush the previous sample content
         for key, idx in zip(self.inputs, range(len(self.inputs))):
             tmp_shape = self.inputs[key].shape
             self.inputs[key].ClearField("shape")
@@ -404,7 +404,7 @@ class EvaluateInference(BaseInference):
             ):
                 # perform an inference on each image, iteratively
                 t3 = time.time()
-                pred = self.seerep_infer_image(sample["images"])
+                pred = self.seerep_infer_image(sample["image"])
                 t4 = time.time()
                 infer_array[idx] = t4 - t3
                 # logger.info('Inference time: {}'.format(t4 - t3))
@@ -434,47 +434,48 @@ class EvaluateInference(BaseInference):
                     data[idx]["predictions"].append(
                         [start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]]
                     )
-                if self.viz:
-                    (tw, th), _ = cv2.getTextSize(
-                        "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9,
-                        2,
-                    )
-                    cv2.rectangle(
-                        sample["image"],
-                        (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
-                        (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
-                        color1,
-                        2,
-                    )
-                    cv2.rectangle(
-                        sample["image"],
-                        (int(start_cord[0]), int(start_cord[1] - 25)),
-                        (int(start_cord[0] + tw), int(start_cord[1])),
-                        color1,
-                        -1,
-                    )
-                    cv2.putText(
-                        sample["image"],
-                        "{} {} %".format(label, round(pred[2][obj], 2) * 100),
-                        (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9,
-                        text_color,
-                        2,
-                    )
+                    if self.viz:
+                        (tw, th), _ = cv2.getTextSize(
+                            "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.9,
+                            2,
+                        )
+                        cv2.rectangle(
+                            sample["image"],
+                            (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
+                            (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
+                            color1,
+                            2,
+                        )
+                        cv2.rectangle(
+                            sample["image"],
+                            (int(start_cord[0]), int(start_cord[1] - 25)),
+                            (int(start_cord[0] + tw), int(start_cord[1])),
+                            color1,
+                            -1,
+                        )
+                        cv2.putText(
+                            sample["image"],
+                            "{} {} %".format(label, round(pred[2][obj], 2) * 100),
+                            (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.9,
+                            text_color,
+                            2,
+                        )
                     # sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
                     # for obj in range(
                     #     cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
-                    winname = "Predicted image number {}".format(idx + 1)
-                    cv2.namedWindow(winname)
-                    cv2.imshow(
-                        winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
-                    )
-                    cv2.moveWindow(winname, 0, 0)
-                    cv2.waitKey()
-                    cv2.destroyWindow(winname)
+                winname = "Predicted image number {}".format(idx + 1)
+                cv2.namedWindow(winname)
+                # cv2.imshow(
+                #     winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
+                # )
+                cv2.imshow(winname, sample['image'])
+                cv2.moveWindow(winname, 0, 0)
+                cv2.waitKey()
+                cv2.destroyWindow(winname) 
                 # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
                 # TODO run evaluation without inference call
                 # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
@@ -521,17 +522,18 @@ class EvaluateInference(BaseInference):
         # t6 = time.time()
         # logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
 
-    def start_inference(self, model_name, format="coco"):
+    def start_inference(self, model_name, format="coco", modality="images"):
         schan = seerep_channel.SEEREPChannel(
             project_name=self.args.seerep_project,
             socket=self.args.channel_seerep,
+            modality=modality,
             format=self.format,  # TODO make it dynamic with Source_Kitti
             visualize=self.viz,
         )
         # socket='localhost:9090')
 
         # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
-        sample_type = "point_clouds"
+        sample_type = "image"
         if sample_type == "image":
             data = schan.run_query_images(self.args.semantics)
             self.process_images(data, schan)
