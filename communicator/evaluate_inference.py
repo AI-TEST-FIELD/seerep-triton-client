@@ -525,57 +525,70 @@ class EvaluateInference(BaseInference):
                     elif found == True:
                         data[idx]['boxes'][gt_idx].append(match_iou)
             if self.viz:
+                adults = []
+                winname = "Predictions --> {}".format(self.model_name)
+                cv2.namedWindow(winname)
                 for sample in data:
-                    # Plot ground truth
-                    for obj in range(len(sample['boxes'])):
-                        cv2.rectangle(
-                                sample["image"],
-                                (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])),
-                                (int(sample['boxes'][obj][2]), int(sample['boxes'][obj][3])),
-                                color2,
-                                1,
-                            ) 
-                        cv2.putText(
-                                sample["image"],
-                                "{}".format(np.round(sample['boxes'][obj][6], 2)),
-                                (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1]) - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.9,
-                                text_color,
-                                2,
-                            )           
-
-                    for obj in range(len(sample['predictions'])):
-                    # Plot prediction box
+                    # Ground truth
+                    adults = [i[4] for i in sample['boxes']]
+                    if 1 in adults:
+                        for obj in range(len(sample['boxes'])):
                             cv2.rectangle(
-                                sample["image"],
-                                (int(sample['predictions'][obj][0]), int(sample['predictions'][obj][1])),
-                                (int(sample['predictions'][obj][2]), int(sample['predictions'][obj][3])),
-                                color1,
-                                1,
-                            )
-
-                    winname = "Prediction {} {}".format(self.model_name, idx + 1)
-                    cv2.namedWindow(winname)
-                    # cv2.imshow(
-                    #     winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
-                    # )
+                                    sample["image"],
+                                    (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])),
+                                    (int(sample['boxes'][obj][2]), int(sample['boxes'][obj][3])),
+                                    color2,
+                                    1,
+                                ) 
+                            cv2.putText(
+                                    sample["image"],
+                                    "{}".format(np.round(sample['boxes'][obj][6], 2)),
+                                    (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1]) - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.9,
+                                    text_color,
+                                    2,
+                                )           
+                    else: 
+                        cv2.putText(
+                                    sample["image"],
+                                    "No Male dummy found in the image",
+                                    (10, 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.9,
+                                    text_color,
+                                    2,
+                                ) 
+                    # Predictions 
+                    for obj in range(len(sample['predictions'])):
+                        cv2.rectangle(
+                            sample["image"],
+                            (int(sample['predictions'][obj][0]), int(sample['predictions'][obj][1])),
+                            (int(sample['predictions'][obj][2]), int(sample['predictions'][obj][3])),
+                            color1,
+                            1,
+                        )
                     cv2.imshow(winname, sample['image'])
-                    cv2.moveWindow(winname, 0, 0)
-                    cv2.waitKey()
-                    cv2.destroyWindow(winname) 
-
+                    # cv2.moveWindow(winname, 0, 0)
+                    cv2.waitKey(0)
+            cv2.destroyWindow(winname)  
             # child = False
             male = False
+            adults = []
             with open('evaluation_list.txt', 'w') as f:
                 for sample in data: 
-                    for det in sample['boxes']:
-                        # Adult == 1 Child == 2
-                        if det[4] == 1 and det[6] > 0.2: # check if adult and IoU greater than 40 percent
-                            male = True
-                        # elif det[4] == 2 and det[6] > 0.3:    # TODO need to add more intelligent and thorough checks for child class
-                        #     child = True
-                    f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], int(male)))                   
+                    # Find at least one adult male dummy 
+                    adults = [i[4] for i in sample['boxes']]
+                    if 1 in adults:
+                        for det in sample['boxes']:
+                            # Adult == 1 Child == 2
+                            if det[4] == 1 and det[6] > 0.2: # check if adult and IoU greater than 40 percent
+                                male = True
+                            # elif det[4] == 2 and det[6] > 0.3:    # TODO need to add more intelligent and thorough checks for child class
+                            #     child = True
+                        f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], int(male)))  
+                    else:                 # No male dummy exists in the ground truth
+                        f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], -1)) 
                     # child = False
                     male = False
                 # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
