@@ -571,7 +571,7 @@ class EvaluateInference(BaseInference):
                     cv2.imshow(winname, sample['image'])
                     # cv2.moveWindow(winname, 0, 0)
                     cv2.waitKey(0)
-            cv2.destroyWindow(winname)  
+                cv2.destroyWindow(winname)  
             # child = False
             male = False
             adults = []
