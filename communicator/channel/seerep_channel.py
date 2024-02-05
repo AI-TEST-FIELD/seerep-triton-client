@@ -413,13 +413,15 @@ class SEEREPChannel():
             sample={}
         return data
     
-    def annotation_dict(self, format='coco'):
+    def annotation_dict(self, format='aitf'):
         anns_dict = {}
         class_names= []
         if format == 'coco':
             filepath = 'config/coco.names'
         elif format == 'kitti':
             filepath = 'config/kitti.names'
+        elif format == 'aitf':
+            filepath = 'config/aitf.names'
         elif format == 'crop':
             filepath = 'config/crop.names'
         with open(filepath, 'r') as fp:
@@ -481,6 +483,7 @@ class SEEREPChannel():
             sample['uuid'] = self._msguuid
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
             sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8)
+            sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
             tmp = sample['image']
             # if sample['image'].shape[2] == 4:
             #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_A2BGR)
@@ -491,41 +494,44 @@ class SEEREPChannel():
             # for category in range(response.LabelsBbLength()):
             for j in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
                 label = response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Label().decode("utf-8")
-                confidence = np.float16(response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Confidence())
-                x, y = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().Y()
-                w, h = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().Y()
-                x_tl, y_tl = x - (w/2), y - (h/2)
-                if x<=1 and y<=1:
-                    self.normalized_coors = True 
-                    sample['normalized'] = True
+                if label == 'child':
+                    continue
                 else:
-                    sample['normalized'] = False
-                    self.normalized_coors = False 
-                if sample['normalized'] == False:
-                    sample['boxes'].append([x_tl, y_tl, w, h, self.ann_dict[label], confidence])
-                else:
-                    scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
-                    sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
-                # For DEBUG
-            #     if self.vis:
-            #         cv2.rectangle(tmp, 
-            #                       (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
-            #                       (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
-            #                       (255, 0, 0), 2)
-            #         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-            #         cv2.rectangle(tmp, 
-            #                       (int(sample['boxes'][j][0]), (int(sample['boxes'][j][1]) - 25)), 
-            #                       (int(sample['boxes'][j][0] + tw), int(sample['boxes'][j][1])), 
-            #                       (255, 0, 0), -1)
-            #         cv2.putText(tmp, label, (int(sample['boxes'][j][0]), int(sample['boxes'][j][1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-            # if self.vis:
-            #     winname = 'SEEREP source image'
-            #     cv2.namedWindow(winname)
-            #     cv2.imshow(winname, tmp)
-            #     cv2.moveWindow(winname, 3000,200)
-            #     cv2.waitKey(0)
-            #     cv2.destroyWindow(winname)    
-            #     tmp = None
+                    confidence = np.float16(response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Confidence())
+                    x, y = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().Y()
+                    w, h = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().Y()
+                    x_tl, y_tl = x - (w/2), y - (h/2)
+                    if x<=1 and y<=1:
+                        self.normalized_coors = True 
+                        sample['normalized'] = True
+                    else:
+                        sample['normalized'] = False
+                        self.normalized_coors = False 
+                    if sample['normalized'] == False:
+                        sample['boxes'].append([x_tl, y_tl, w, h, self.ann_dict[label], confidence])
+                    else:
+                        scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
+                        sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
+                    # For DEBUG
+                #     if self.vis:
+                #         cv2.rectangle(tmp, 
+                #                       (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
+                #                       (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
+                #                       (255, 0, 0), 2)
+                #         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                #         cv2.rectangle(tmp, 
+                #                       (int(sample['boxes'][j][0]), (int(sample['boxes'][j][1]) - 25)), 
+                #                       (int(sample['boxes'][j][0] + tw), int(sample['boxes'][j][1])), 
+                #                       (255, 0, 0), -1)
+                #         cv2.putText(tmp, label, (int(sample['boxes'][j][0]), int(sample['boxes'][j][1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
+                # if self.vis:
+                #     winname = 'SEEREP source image'
+                #     cv2.namedWindow(winname)
+                #     cv2.imshow(winname, tmp)
+                #     cv2.moveWindow(winname, 3000,200)
+                #     cv2.waitKey(0)
+                #     cv2.destroyWindow(winname)    
+                #     tmp = None
             data.append(sample)
             sample={}
         logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))

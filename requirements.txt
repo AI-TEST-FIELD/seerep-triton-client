@@ -1,4 +1,4 @@
-seerep_grpc==0.2.5
+seerep_grpc==0.2.4
 pycocotools
 fast-coco-eval
 tritonclient[all]
@@ -6,6 +6,8 @@ imutils
 colorlog
 scipy
 requests
+torchvision==0.15.2
+torch==2.0.1
 # 3D inference with OpenPCDet 
 # pyquaternion
 # easydict

@@ -8,6 +8,8 @@ import logging
 from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
+import torchvision
+import torch
 # import open3d as o3d
 
 from tritonclient.grpc import service_pb2, service_pb2_grpc
@@ -27,7 +29,6 @@ from logger import Client_logger, TqdmToLogger
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
 # O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
-
 
 class EvaluateInference(BaseInference):
 
@@ -388,8 +389,8 @@ class EvaluateInference(BaseInference):
             )
         else:
             # logger.info('Fetching time: {} s'.format(np.round(t2 - t1, 3)))
-            color1 = (255, 0, 0)  # red
-            color2 = (255, 255, 255)  # green
+            color1 = (0, 0, 255)  # red
+            color2 = (255, 255, 255)  # white
             text_color = (255, 255, 255)
             # traverse through the images
             # logger.info('Sending inference request to Triton for each sample')
@@ -434,48 +435,149 @@ class EvaluateInference(BaseInference):
                     data[idx]["predictions"].append(
                         [start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]]
                     )
-                    if self.viz:
-                        (tw, th), _ = cv2.getTextSize(
-                            "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.9,
-                            2,
-                        )
-                        cv2.rectangle(
-                            sample["image"],
-                            (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
-                            (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
-                            color1,
-                            2,
-                        )
-                        cv2.rectangle(
-                            sample["image"],
-                            (int(start_cord[0]), int(start_cord[1] - 25)),
-                            (int(start_cord[0] + tw), int(start_cord[1])),
-                            color1,
-                            -1,
-                        )
-                        cv2.putText(
-                            sample["image"],
-                            "{} {} %".format(label, round(pred[2][obj], 2) * 100),
-                            (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.9,
-                            text_color,
-                            2,
-                        )
+                    # if self.viz:
+                    #     (tw, th), _ = cv2.getTextSize(
+                    #         # "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
+                    #         "{}".format(label),
+                    #         cv2.FONT_HERSHEY_SIMPLEX,
+                    #         0.9,
+                    #         2,
+                    #     )
+                    #     # Plot prediction box
+                    #     cv2.rectangle(
+                    #         sample["image"],
+                    #         (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
+                    #         (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
+                    #         color1,
+                    #         2,
+                    #     )
+                    #     # Plot prediction label background box
+                    #     cv2.rectangle(
+                    #         sample["image"],
+                    #         (int(start_cord[0]), int(start_cord[1] - 25)),
+                    #         (int(start_cord[0] + tw), int(start_cord[1])),
+                    #         color1,
+                    #         -1,
+                    #     )
+                    #     # Put class label and confidence value
+                    #     cv2.putText(
+                    #         sample["image"],
+                    #         # "{} {} %".format(label, round(pred[2][obj], 2) * 100),
+                    #         "{}".format(label),
+                    #         (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
+                    #         cv2.FONT_HERSHEY_SIMPLEX,
+                    #         0.9,
+                    #         text_color,
+                    #         2,
+                    #     )
                     # sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
                     # for obj in range(
                     #     cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
-                winname = "Predicted image number {}".format(idx + 1)
-                cv2.namedWindow(winname)
-                # cv2.imshow(
-                #     winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
-                # )
-                cv2.imshow(winname, sample['image'])
-                cv2.moveWindow(winname, 0, 0)
-                cv2.waitKey()
-                cv2.destroyWindow(winname) 
+                
+                # for obj in range(len(sample['boxes'])):
+                #     cv2.rectangle(
+                #             sample["image"],
+                #             (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])),
+                #             (int(sample['boxes'][obj][0] + sample['boxes'][obj][2]), 
+                #              int(sample['boxes'][obj][1] + sample['boxes'][obj][3])),
+                #             color2,
+                #             2,
+                #         )
+                #     # cv2.putText(
+                #     #         sample["image"],
+                #     #         # "{} {} %".format(label, round(pred[2][obj], 2) * 100),
+                #     #         "{}".format(label),
+                #     #         (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
+                #     #         cv2.FONT_HERSHEY_SIMPLEX,
+                #     #         0.9,
+                #     #         text_color,
+                #     #         2,
+                #     #     )
+                # if self.viz:
+                #     winname = "Prediction {} {}".format(self.model_name, idx + 1)
+                #     cv2.namedWindow(winname)
+                #     # cv2.imshow(
+                #     #     winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
+                #     # )
+                #     cv2.imshow(winname, sample['image'])
+                #     cv2.moveWindow(winname, 0, 0)
+                #     cv2.waitKey()
+                #     cv2.destroyWindow(winname) 
+
+            for idx in range(len(data)):
+                for gt_idx in range(len(data[idx]['boxes'])):
+                    gt_box = data[idx]['boxes'][gt_idx]
+                    gt_box[2:4] = np.add(gt_box[0:2], gt_box[2:4])  # from x1y1wh to x1y1x2y2
+                    box1 = torch.tensor([gt_box[0:4]], dtype=torch.float)
+                    found = False
+                    match_iou = 0.0 
+                    for pred_idx in range(len(data[idx]['predictions'])):
+                        pred_box = data[idx]['predictions'][pred_idx]
+                        pred_box[2:4] = np.array(np.add(pred_box[0:2], pred_box[2:4])) #from x1y1wh to x1y1x2y2
+                        # if pred_box[4] == gt_box[4]: # classes are matched
+                        box2 = torch.tensor([pred_box[0:4]], dtype=torch.float)
+                        iou = torchvision.ops.box_iou(box1, box2).item()
+                        if iou > 0.2:
+                            found = True
+                            match_iou = iou
+                    if found == False:
+                        data[idx]['boxes'][gt_idx].append(0.00)
+                    elif found == True:
+                        data[idx]['boxes'][gt_idx].append(match_iou)
+            if self.viz:
+                for sample in data:
+                    # Plot ground truth
+                    for obj in range(len(sample['boxes'])):
+                        cv2.rectangle(
+                                sample["image"],
+                                (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])),
+                                (int(sample['boxes'][obj][2]), int(sample['boxes'][obj][3])),
+                                color2,
+                                1,
+                            ) 
+                        cv2.putText(
+                                sample["image"],
+                                "{}".format(np.round(sample['boxes'][obj][6], 2)),
+                                (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1]) - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.9,
+                                text_color,
+                                2,
+                            )           
+
+                    for obj in range(len(sample['predictions'])):
+                    # Plot prediction box
+                            cv2.rectangle(
+                                sample["image"],
+                                (int(sample['predictions'][obj][0]), int(sample['predictions'][obj][1])),
+                                (int(sample['predictions'][obj][2]), int(sample['predictions'][obj][3])),
+                                color1,
+                                1,
+                            )
+
+                    winname = "Prediction {} {}".format(self.model_name, idx + 1)
+                    cv2.namedWindow(winname)
+                    # cv2.imshow(
+                    #     winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
+                    # )
+                    cv2.imshow(winname, sample['image'])
+                    cv2.moveWindow(winname, 0, 0)
+                    cv2.waitKey()
+                    cv2.destroyWindow(winname) 
+
+            # child = False
+            male = False
+            with open('evaluation_list.txt', 'w') as f:
+                for sample in data: 
+                    for det in sample['boxes']:
+                        # Adult == 1 Child == 2
+                        if det[4] == 1 and det[6] > 0.2: # check if adult and IoU greater than 40 percent
+                            male = True
+                        # elif det[4] == 2 and det[6] > 0.3:    # TODO need to add more intelligent and thorough checks for child class
+                        #     child = True
+                    f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], int(male)))                   
+                    # child = False
+                    male = False
                 # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
                 # TODO run evaluation without inference call
                 # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')

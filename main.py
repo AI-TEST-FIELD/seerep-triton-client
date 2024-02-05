@@ -97,6 +97,7 @@ if __name__ == '__main__':
         format='kitti'
     else:
         format='coco'
+    format='aitf'
     client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
 
     #define channel
