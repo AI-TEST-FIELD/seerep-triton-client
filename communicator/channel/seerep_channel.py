@@ -20,7 +20,7 @@ from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
 
-from seerep.fb import BoundingBoxes2DLabeledStamped, Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
+from seerep.fb import Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp#, BoundingBoxes2DLabeledStamped
 from seerep.fb import PointCloud2 as pc2
 from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
@@ -71,6 +71,8 @@ class SEEREPChannel():
         self.modality = modality
         self.register_channel()
         self.ann_dict = self.annotation_dict(format=format)
+        self.source_window = 'SEEREP source image'
+        cv2.namedWindow(self.source_window)
         # if ros_test:
         #     rospy.init_node('ros_infer')
         #     self.ros_message = PointCloud2()
@@ -291,40 +293,6 @@ class SEEREPChannel():
         #Query.AddBoundingbox(self._builder, boundingbox)
         return boundingbox
 
-    def gen_boundingbox2dlabeledstamped (self, boundingBoxes):
-
-        projuuid_str = self.string_to_fbmsg(self._projectid)
-        msguuid_str = self.string_to_fbmsg(self._msguuid)
-
-        # build header
-        Header.Start(self._builder)
-        Header.AddUuidProject(self._builder, projuuid_str)
-        Header.AddUuidMsgs(self._builder, msguuid_str)
-        header = Header.End(self._builder)
-
-        # a labels_bb array which will hold all the bbs
-        label_bbs = []
-
-        # create bounding box(es)
-        for bb in boundingBoxes:
-            x = self.gen_boundingbox(bb[0], bb[1])
-            label_bbs.append(x)
-
-        BoundingBoxes2DLabeledStamped.StartLabelsBbVector(self._builder, len(label_bbs))
-        for bb in reversed(label_bbs):
-            self._builder.PrependUOffsetTRelative(bb)
-        self._builder.EndVector()
-
-        # Start a new bounding box 2d labeled stamped
-        BoundingBoxes2DLabeledStamped.Start(self._builder)
-
-        BoundingBoxes2DLabeledStamped.AddHeader(self._builder, header)
-
-        for label_bb in label_bbs:
-            BoundingBoxes2DLabeledStamped.AddLabelsBb(self._builder, label_bb)
-
-        return BoundingBoxes2DLabeledStamped.End(self._builder)
-
     def gen_timestamp(self, starttime, endtime):
         '''
         Add a time range to the query builder
@@ -482,7 +450,7 @@ class SEEREPChannel():
             # response.Header().Stamp().Nanos()
             sample['uuid'] = self._msguuid
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
-            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8)
+            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
             sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
             tmp = sample['image']
             # if sample['image'].shape[2] == 4:
@@ -492,49 +460,51 @@ class SEEREPChannel():
             #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
             sample['boxes'] = []
             # for category in range(response.LabelsBbLength()):
-            for j in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
-                label = response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Label().decode("utf-8")
-                if label == 'child':
-                    continue
-                else:
-                    confidence = np.float16(response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Confidence())
-                    x, y = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().Y()
-                    w, h = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().Y()
-                    x_tl, y_tl = x - (w/2), y - (h/2)
-                    if x<=1 and y<=1:
-                        self.normalized_coors = True 
-                        sample['normalized'] = True
-                    else:
-                        sample['normalized'] = False
-                        self.normalized_coors = False 
-                    if sample['normalized'] == False:
-                        sample['boxes'].append([x_tl, y_tl, w, h, self.ann_dict[label], confidence])
-                    else:
-                        scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
-                        sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
-                    # For DEBUG
-                #     if self.vis:
-                #         cv2.rectangle(tmp, 
-                #                       (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
-                #                       (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
-                #                       (255, 0, 0), 2)
-                #         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                #         cv2.rectangle(tmp, 
-                #                       (int(sample['boxes'][j][0]), (int(sample['boxes'][j][1]) - 25)), 
-                #                       (int(sample['boxes'][j][0] + tw), int(sample['boxes'][j][1])), 
-                #                       (255, 0, 0), -1)
-                #         cv2.putText(tmp, label, (int(sample['boxes'][j][0]), int(sample['boxes'][j][1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-                # if self.vis:
-                #     winname = 'SEEREP source image'
-                #     cv2.namedWindow(winname)
-                #     cv2.imshow(winname, tmp)
-                #     cv2.moveWindow(winname, 3000,200)
-                #     cv2.waitKey(0)
-                #     cv2.destroyWindow(winname)    
-                #     tmp = None
+            #TODO will this be changed to DATUMARO STRING? 
+            ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            # for j in range(response.LabelsLength()):
+            #     # label = response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Label().decode("utf-8")
+            #     label = response.Labels()
+            #     if label == 'child':
+            #         continue
+            #     else:
+            #         confidence = np.float16(response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Confidence())
+            #         x, y = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().Y()
+            #         w, h = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().Y()
+            #         x_tl, y_tl = x - (w/2), y - (h/2)
+            #         if x<=1 and y<=1:
+            #             self.normalized_coors = True 
+            #             sample['normalized'] = True
+            #         else:
+            #             sample['normalized'] = False
+            #             self.normalized_coors = False 
+            #         if sample['normalized'] == False:
+            #             sample['boxes'].append([x_tl, y_tl, w, h, self.ann_dict[label], confidence])
+            #         else:
+            #             scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
+            #             sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
+            #         # For DEBUG
+            #         if self.vis:
+            #             cv2.rectangle(tmp, 
+            #                           (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
+            #                           (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
+            #                           (255, 0, 0), 2)
+            #             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+            #             cv2.rectangle(tmp, 
+            #                           (int(sample['boxes'][j][0]), (int(sample['boxes'][j][1]) - 25)), 
+            #                           (int(sample['boxes'][j][0] + tw), int(sample['boxes'][j][1])), 
+            #                           (255, 0, 0), -1)
+            #             cv2.putText(tmp, label, (int(sample['boxes'][j][0]), int(sample['boxes'][j][1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
+            ## <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            # if self.vis: 
+            #     cv2.imshow(self.source_window, tmp)
+            #     cv2.moveWindow(self.source_window, 3000,200)
+            #     cv2.waitKey(0)    
+            #     tmp = None
             data.append(sample)
             sample={}
         logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
+        cv2.destroyWindow(self.source_window)
         return data
     
     def run_query_pointclouds(self, *args):

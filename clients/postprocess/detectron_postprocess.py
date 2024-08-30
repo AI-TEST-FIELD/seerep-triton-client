@@ -31,7 +31,7 @@ class FCOSpostprocess(Postprocess):
             class_names.append(line)
         return class_names
 
-    def extract_boxes(self, prediction):
+    def extract_boxes(self, prediction, conf_thres=0.4):
         """Runs Non-Maximum Suppression (NMS) on inference results
 
             Returns:
@@ -45,6 +45,6 @@ class FCOSpostprocess(Postprocess):
         scores = np.reshape(scores, prediction.outputs[2].shape)
         class_ids = self.deserialize_bytes_int(prediction.raw_output_contents[3])
         class_ids = np.reshape(class_ids, prediction.outputs[3].shape)
-        conf_inds = np.where(scores > 0.40)
+        conf_inds = np.where(scores > conf_thres)
         return [boxes[conf_inds], class_ids[conf_inds], scores[conf_inds]]
         # return [boxes, class_ids, scores]
