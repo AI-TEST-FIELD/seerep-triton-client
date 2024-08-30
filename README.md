@@ -28,6 +28,14 @@ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.000
 Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.494
 Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.556
 ```
+
+## List of available models 
+
+````bash
+retina_big
+yolov5m_coco
+yolov5m_iso_onnx
+```
 ## Acknowledgements
 1. [Triton Inference Server](https://github.com/triton-inference-server/server)
 2. [COCO API](https://github.com/cocodataset/cocoapi)
