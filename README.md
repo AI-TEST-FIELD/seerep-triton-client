@@ -30,8 +30,8 @@ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.556
 ```
 
 ## List of available models 
-
-````bash
+You can currently pass following model strings for inference from triton-server as arguments to above command:
+```bash
 retina_big
 yolov5m_coco
 yolov5m_iso_onnx
