@@ -24,6 +24,7 @@ from .base_inference import BaseInference
 from communicator.channel import seerep_channel
 from tools.seerep2coco import COCO_SEEREP
 from logger import Client_logger, TqdmToLogger
+from utils import cxcy2xyxy, xyxy2cxcy
 # from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
@@ -76,11 +77,45 @@ class EvaluateInference(BaseInference):
         }
         logging.basicConfig(level=log_level[args.log_level])
         self.viz = args.visualize
+        if self.viz:
+            self.winname = "Prediction {}".format(self.model_name)
+            cv2.namedWindow(self.winname)
         self.count = 0
         self.id_list_preds = []
         self.id_list_gts = []
         self.all_predictions = []
         self.all_groundtruths = []
+        self.datumaro_item = {
+            "id": "example_img",
+            "annotations": [
+                {
+                    "id": 0,
+                    "type": "bbox",
+                    "attributes":{
+                        "occluded": "false",
+                        "rotation": 0.0,
+                    },
+                    "group": 0,
+                    "label_id": 0, 
+                    "z_order": 0,
+                    "bbox":[
+                        0, 
+                        1,
+                        2,
+                        3
+                    ]
+                },
+            ],
+            "attr": {
+                "frame": 0
+            },
+            "point_cloud": {
+                "path": ""
+            },
+            "media": {
+                "path": ""
+            }
+        }
         self.bag_processed = False
         self.gt_processed = False
         self.img_processed = False
@@ -211,12 +246,8 @@ class EvaluateInference(BaseInference):
             self.channel.request.raw_input_contents.extend([self.image.tobytes()])
             self.channel.response = self.channel.do_inference()  # Inference
             self.prediction = self.client_postprocess.extract_boxes(
-                self.channel.response
+                self.channel.response, conf_thres=0.3,
             )
-            filter_classes = np.where(self.prediction[1] == 0)[0]
-            self.prediction[0] = self.prediction[0][filter_classes, :]
-            self.prediction[1] = self.prediction[1][filter_classes]
-            self.prediction[2] = self.prediction[2][filter_classes]
             if len(self.prediction[1]) > 0:
                 # if self.viz:
                 #     # tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
@@ -243,6 +274,13 @@ class EvaluateInference(BaseInference):
                         self.prediction[2][persons],
                     )
                 elif self.format == "coco":
+                    persons = np.where(self.prediction[1] == 0)  # filter persons
+                    return (
+                        self.prediction[0][persons],
+                        self.prediction[1][persons],
+                        self.prediction[2][persons],
+                    )
+                elif self.format == "aitf":
                     persons = np.where(self.prediction[1] == 0)  # filter persons
                     return (
                         self.prediction[0][persons],
@@ -392,10 +430,11 @@ class EvaluateInference(BaseInference):
             color1 = (0, 0, 255)  # red
             color2 = (255, 255, 255)  # white
             text_color = (255, 255, 255)
+            color3 = (255, 0, 0)
             # traverse through the images
             # logger.info('Sending inference request to Triton for each sample')
             infer_array = np.zeros(len(data), dtype=np.float16)
-            for sample, idx in tqdm(
+            for sample, seerep_sample_idx in tqdm(
                 zip(data, range(len(data))),
                 total=len(data),
                 colour="GREEN",
@@ -403,198 +442,134 @@ class EvaluateInference(BaseInference):
                 unit="requests",
                 ascii=True,
             ):
+                predictions = {
+                'annotations':[],
+                'dm_format_version':1,
+                }
                 # perform an inference on each image, iteratively
                 t3 = time.time()
                 pred = self.seerep_infer_image(sample["image"])
                 t4 = time.time()
-                infer_array[idx] = t4 - t3
+                infer_array[seerep_sample_idx] = t4 - t3
                 # logger.info('Inference time: {}'.format(t4 - t3))
-                sample["predictions"] = []
-                bbs = []
-                labels = []
-                confidences = []
-                # traverse the predictions for the current image
-                for obj in range(len(pred[1])):
-                    start_cord, end_cord = (pred[0][obj, 0], pred[0][obj, 1]), (
-                        pred[0][obj, 2],
-                        pred[0][obj, 3],
-                    )
-                    x, y, w, h = (
-                        (start_cord[0] + end_cord[0]) / 2,
-                        (start_cord[1] + end_cord[1]) / 2,
-                        end_cord[0] - start_cord[0],
-                        end_cord[1] - start_cord[1],
-                    )
-                    assert x > 0 and y > 0 and w > 0 and h > 0
-                    label = self.class_names[int(pred[1][obj])]
-                    confidences.append(pred[2][obj])
-                    bbs.append(
-                        ((x, y), (w, h))
-                    )  # SEEREP expects center x,y and width, height
-                    labels.append(label)
-                    data[idx]["predictions"].append(
-                        [start_cord[0], start_cord[1], w, h, pred[1][obj], pred[2][obj]]
-                    )
-                    # if self.viz:
-                    #     (tw, th), _ = cv2.getTextSize(
-                    #         # "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
-                    #         "{}".format(label),
-                    #         cv2.FONT_HERSHEY_SIMPLEX,
-                    #         0.9,
-                    #         2,
-                    #     )
-                    #     # Plot prediction box
-                    #     cv2.rectangle(
-                    #         sample["image"],
-                    #         (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
-                    #         (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
-                    #         color1,
-                    #         2,
-                    #     )
-                    #     # Plot prediction label background box
-                    #     cv2.rectangle(
-                    #         sample["image"],
-                    #         (int(start_cord[0]), int(start_cord[1] - 25)),
-                    #         (int(start_cord[0] + tw), int(start_cord[1])),
-                    #         color1,
-                    #         -1,
-                    #     )
-                    #     # Put class label and confidence value
-                    #     cv2.putText(
-                    #         sample["image"],
-                    #         # "{} {} %".format(label, round(pred[2][obj], 2) * 100),
-                    #         "{}".format(label),
-                    #         (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
-                    #         cv2.FONT_HERSHEY_SIMPLEX,
-                    #         0.9,
-                    #         text_color,
-                    #         2,
-                    #     )
-                    # sample['predictions'].append([x, y, w, h, pred[1][obj], pred[2][obj]])
-                    # for obj in range(
-                    #     cv2.putText(sample['image'], '{} {} %'.format(label, round(pred[2][obj], 2)*100), (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
+                tmp = {
+                    'bbox':[],
+                    'id':'1',
+                    'label_id':'',
+                    'score':1,
+                }
                 
-                # for obj in range(len(sample['boxes'])):
-                #     cv2.rectangle(
-                #             sample["image"],
-                #             (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])),
-                #             (int(sample['boxes'][obj][0] + sample['boxes'][obj][2]), 
-                #              int(sample['boxes'][obj][1] + sample['boxes'][obj][3])),
-                #             color2,
-                #             2,
-                #         )
-                #     # cv2.putText(
-                #     #         sample["image"],
-                #     #         # "{} {} %".format(label, round(pred[2][obj], 2) * 100),
-                #     #         "{}".format(label),
-                #     #         (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
-                #     #         cv2.FONT_HERSHEY_SIMPLEX,
-                #     #         0.9,
-                #     #         text_color,
-                #     #         2,
-                #     #     )
-                # if self.viz:
-                #     winname = "Prediction {} {}".format(self.model_name, idx + 1)
-                #     cv2.namedWindow(winname)
-                #     # cv2.imshow(
-                #     #     winname, cv2.cvtColor(sample["image"], cv2.COLOR_RGB2BGR)
-                #     # )
-                #     cv2.imshow(winname, sample['image'])
-                #     cv2.moveWindow(winname, 0, 0)
-                #     cv2.waitKey()
-                #     cv2.destroyWindow(winname) 
-
-            for idx in range(len(data)):
-                for gt_idx in range(len(data[idx]['boxes'])):
-                    gt_box = data[idx]['boxes'][gt_idx]
-                    gt_box[2:4] = np.add(gt_box[0:2], gt_box[2:4])  # from x1y1wh to x1y1x2y2
-                    box1 = torch.tensor([gt_box[0:4]], dtype=torch.float)
-                    found = False
-                    match_iou = 0.0 
-                    for pred_idx in range(len(data[idx]['predictions'])):
-                        pred_box = data[idx]['predictions'][pred_idx]
-                        pred_box[2:4] = np.array(np.add(pred_box[0:2], pred_box[2:4])) #from x1y1wh to x1y1x2y2
-                        # if pred_box[4] == gt_box[4]: # classes are matched
-                        box2 = torch.tensor([pred_box[0:4]], dtype=torch.float)
-                        iou = torchvision.ops.box_iou(box1, box2).item()
-                        if iou > 0.2:
-                            found = True
-                            match_iou = iou
-                    if found == False:
-                        data[idx]['boxes'][gt_idx].append(0.00)
-                    elif found == True:
-                        data[idx]['boxes'][gt_idx].append(match_iou)
-            if self.viz:
-                adults = []
-                winname = "Predictions --> {}".format(self.model_name)
-                cv2.namedWindow(winname)
-                for sample in data:
-                    # Ground truth
-                    adults = [i[4] for i in sample['boxes']]
-                    if 1 in adults:
-                        for obj in range(len(sample['boxes'])):
-                            cv2.rectangle(
-                                    sample["image"],
-                                    (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1])),
-                                    (int(sample['boxes'][obj][2]), int(sample['boxes'][obj][3])),
-                                    color2,
-                                    1,
-                                ) 
-                            cv2.putText(
-                                    sample["image"],
-                                    "{}".format(np.round(sample['boxes'][obj][6], 2)),
-                                    (int(sample['boxes'][obj][0]), int(sample['boxes'][obj][1]) - 5),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.9,
-                                    text_color,
-                                    2,
-                                )           
-                    else: 
-                        cv2.putText(
-                                    sample["image"],
-                                    "No Male dummy found in the image",
-                                    (10, 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.9,
-                                    text_color,
-                                    2,
-                                ) 
-                    # Predictions 
-                    for obj in range(len(sample['predictions'])):
-                        cv2.rectangle(
-                            sample["image"],
-                            (int(sample['predictions'][obj][0]), int(sample['predictions'][obj][1])),
-                            (int(sample['predictions'][obj][2]), int(sample['predictions'][obj][3])),
-                            color1,
-                            1,
+                # traverse the predictions for the current image
+                if len(pred[1]) == 0:
+                    pass
+                else:
+                    for obj in range(len(pred[1])):
+                        start_cord, end_cord = (pred[0][obj, 0], pred[0][obj, 1]), \
+                                               (pred[0][obj, 2], pred[0][obj, 3])
+                        x, y, w, h = (
+                            (start_cord[0] + end_cord[0]) / 2,
+                            (start_cord[1] + end_cord[1]) / 2,
+                            end_cord[0] - start_cord[0],
+                            end_cord[1] - start_cord[1],
                         )
-                    cv2.imshow(winname, sample['image'])
-                    # cv2.moveWindow(winname, 0, 0)
-                    cv2.waitKey(0)
-                cv2.destroyWindow(winname)  
+                        assert x > 0 and y > 0 and w > 0 and h > 0
+                        tmp['bbox'] = [x, y, w, h]
+                        tmp['score'] = pred[2][obj]
+                        tmp['id'] = str(int(pred[1][obj]))
+                        tmp['label_id'] = str(seerep_sample_idx)
+                        predictions['annotations'].append(tmp)
+                        tmp = {
+                            'bbox':[],
+                            'id':'1',
+                            'label_id':'',
+                            'score':1,
+                        }
+                        # Visualize the predictions generated by triton inference
+                        if self.viz:
+                            label = self.class_names[int(pred[1][obj])]
+                            (tw, th), _ = cv2.getTextSize(
+                                # "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
+                                "{}".format(label),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.9,
+                                2,
+                            )
+                            # Plot prediction box
+                            cv2.rectangle(
+                                sample["image"],
+                                (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
+                                (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
+                                color1,
+                                2,
+                            )
+                            # Plot prediction label background box
+                            cv2.rectangle(
+                                sample["image"],
+                                (int(start_cord[0]), int(start_cord[1] - 25)),
+                                (int(start_cord[0] + tw), int(start_cord[1])),
+                                color1,
+                                -1,
+                            )
+                            # Put class label and confidence value
+                            cv2.putText(
+                                sample["image"],
+                                # "{} {} %".format(label, round(pred[2][obj], 2) * 100),
+                                "{}".format(label),
+                                (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.9,
+                                text_color,
+                                2,
+                            )
+                        
+                    data[seerep_sample_idx]['annotations']['items'].append(predictions) 
+                # Visualize the groundtruth annotations on the same image as predictions
+                for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
+                    bbox = ann['bbox']
+                    bbox = cxcy2xyxy(bbox)
+                    label = int(ann['id'])
+                    cv2.rectangle(sample['image'], 
+                                    (bbox[0], bbox[1]), 
+                                    (bbox[2], bbox[3]), 
+                                    color3, 2)
+                    # (tw, th), _ = cv2.getTextSize(self.ann_dict[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                    # cv2.rectangle(sample['image'], 
+                    #                 (bbox[0], bbox[1] - 25), 
+                    #                 (bbox[0] + tw, bbox[1]), 
+                    #                 color3, -1)
+                    cv2.putText(sample['image'], 
+                                str(label), 
+                                (bbox[0], bbox[1] - 5), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 
+                                0.9, (255,255,255), 2)
+                if self.viz:
+                    cv2.imshow(self.winname, sample['image'])
+                    cv2.waitKey() 
+
+            cv2.destroyWindow(self.winname)  
             # child = False
-            male = False
-            adults = []
-            with open('evaluation_list.txt', 'w') as f:
-                for sample in data: 
-                    # Find at least one adult male dummy 
-                    adults = [i[4] for i in sample['boxes']]
-                    if 1 in adults:
-                        for det in sample['boxes']:
-                            # Adult == 1 Child == 2
-                            if det[4] == 1 and det[6] > 0.2: # check if adult and IoU greater than 40 percent
-                                male = True
-                            # elif det[4] == 2 and det[6] > 0.3:    # TODO need to add more intelligent and thorough checks for child class
-                            #     child = True
-                        f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], int(male)))  
-                    else:                 # No male dummy exists in the ground truth
-                        f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], -1)) 
-                    # child = False
-                    male = False
-                # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
-                # TODO run evaluation without inference call
-                # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
-                # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
+            # male = False
+            # adults = []
+            # with open('evaluation_list.txt', 'w') as f:
+            #     for sample in data: 
+            #         # Find at least one adult male dummy 
+            #         adults = [i[4] for i in sample['boxes']]
+            #         if 1 in adults:
+            #             for det in sample['boxes']:
+            #                 # Adult == 1 Child == 2
+            #                 if det[4] == 1 and det[6] > 0.2: # check if adult and IoU greater than 40 percent
+            #                     male = True
+            #                 # elif det[4] == 2 and det[6] > 0.3:    # TODO need to add more intelligent and thorough checks for child class
+            #                 #     child = True
+            #             f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], int(male)))  
+            #         else:                 # No male dummy exists in the ground truth
+            #             f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], -1)) 
+            #         # child = False
+            #         male = False
+            # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
+            # TODO run evaluation without inference call
+            # seerep_channel.sendboundingbox(sample, annotations, self.model_name)
+            # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
 
     def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
         # traverse through the samples

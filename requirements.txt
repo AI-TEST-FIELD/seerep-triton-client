@@ -1,4 +1,4 @@
-seerep_grpc==0.2.4
+seerep_grpc==0.3.1
 pycocotools
 fast-coco-eval
 tritonclient[all]
