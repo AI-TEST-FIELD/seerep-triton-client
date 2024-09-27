@@ -419,7 +419,7 @@ class EvaluateInference(BaseInference):
                 ref_labels=labels[indices],
             )
 
-    def process_images(self, data, seerep_channel: seerep_channel.SEEREPChannel):
+    def process_images(self, data):
         t2 = time.time()
         if len(data) == 0:
             logger.critical(
@@ -467,14 +467,14 @@ class EvaluateInference(BaseInference):
                         start_cord, end_cord = (pred[0][obj, 0], pred[0][obj, 1]), \
                                                (pred[0][obj, 2], pred[0][obj, 3])
                         x, y, w, h = (
-                            (start_cord[0] + end_cord[0]) / 2,
-                            (start_cord[1] + end_cord[1]) / 2,
-                            end_cord[0] - start_cord[0],
-                            end_cord[1] - start_cord[1],
+                            np.round((start_cord[0] + end_cord[0]) / 2, 2),
+                            np.round((start_cord[1] + end_cord[1]) / 2, 2),
+                            np.round(end_cord[0] - start_cord[0], 2),
+                            np.round(end_cord[1] - start_cord[1], 2),
                         )
                         assert x > 0 and y > 0 and w > 0 and h > 0
                         tmp['bbox'] = [x, y, w, h]
-                        tmp['score'] = pred[2][obj]
+                        tmp['score'] = np.round(pred[2][obj], 2)
                         tmp['id'] = str(int(pred[1][obj]))
                         tmp['label_id'] = str(seerep_sample_idx)
                         predictions['annotations'].append(tmp)
@@ -524,29 +524,29 @@ class EvaluateInference(BaseInference):
                         
                     data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
-                for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
-                    bbox = ann['bbox']
-                    bbox = cxcy2xyxy(bbox)
-                    label = int(ann['id'])
-                    cv2.rectangle(sample['image'], 
-                                    (bbox[0], bbox[1]), 
-                                    (bbox[2], bbox[3]), 
-                                    color3, 2)
-                    # (tw, th), _ = cv2.getTextSize(self.ann_dict[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                    # cv2.rectangle(sample['image'], 
-                    #                 (bbox[0], bbox[1] - 25), 
-                    #                 (bbox[0] + tw, bbox[1]), 
-                    #                 color3, -1)
-                    cv2.putText(sample['image'], 
-                                str(label), 
-                                (bbox[0], bbox[1] - 5), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.9, (255,255,255), 2)
                 if self.viz:
+                    for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
+                        bbox = ann['bbox']
+                        bbox = cxcy2xyxy(bbox)
+                        label = int(ann['id'])
+                        cv2.rectangle(sample['image'], 
+                                        (bbox[0], bbox[1]), 
+                                        (bbox[2], bbox[3]), 
+                                        color3, 2)
+                        # (tw, th), _ = cv2.getTextSize(self.ann_dict[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                        # cv2.rectangle(sample['image'], 
+                        #                 (bbox[0], bbox[1] - 25), 
+                        #                 (bbox[0] + tw, bbox[1]), 
+                        #                 color3, -1)
+                        cv2.putText(sample['image'], 
+                                    str(label), 
+                                    (bbox[0], bbox[1] - 5), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 
+                                    0.9, (255,255,255), 2)
                     cv2.imshow(self.winname, sample['image'])
                     cv2.waitKey() 
-
-            cv2.destroyWindow(self.winname)  
+            if self.viz:
+                cv2.destroyWindow(self.winname) 
             # child = False
             # male = False
             # adults = []
@@ -569,7 +569,9 @@ class EvaluateInference(BaseInference):
             # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
             # TODO run evaluation without inference call
             # seerep_channel.sendboundingbox(sample, annotations, self.model_name)
-            # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
+            logger.info('Sent boxes for image under category name {}'.format(self.model_name))
+            
+        return data
 
     def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
         # traverse through the samples
@@ -620,17 +622,18 @@ class EvaluateInference(BaseInference):
             format=self.format,  # TODO make it dynamic with Source_Kitti
             visualize=self.viz,
         )
-        # socket='localhost:9090')
-
+        
         # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
         sample_type = "image"
         if sample_type == "image":
             data = schan.run_query_images(self.args.semantics)
-            self.process_images(data, schan)
+            data = self.process_images(data)
+            # Send predictions back to SEEREP for future use
+            schan.send_dataset(data)
         elif sample_type == "point_clouds":
             data = schan.run_query_pointclouds(self.args.semantics)
             self.process_pc(data, schan)
-
+    
     def _scale_boxes(self, box, normalized=False):
         """
         box: Bounding box generated for the image size (e.g. 512 x 512) expected by the model at triton server
