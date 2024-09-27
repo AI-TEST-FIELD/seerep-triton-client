@@ -13,23 +13,41 @@ import numpy as np
 import struct
 import flatbuffers
 import grpc
+import uuid
 import logging
 from tqdm import tqdm
 from copy import copy
-from typing import Set, Tuple
+from typing import Set, Tuple, List
 from scipy.spatial.transform import Rotation as R
 
-from seerep.fb import Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp#, BoundingBoxes2DLabeledStamped
+from seerep.fb import Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp, TRANSMISSION_STATE#, BoundingBoxes2DLabeledStamped
 from seerep.fb import PointCloud2 as pc2
 from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
 from seerep.fb import meta_operations_grpc_fb as metaOperations
 from seerep.util import fb_helper as util_fb
+from seerep.fb.ServerResponse import ServerResponse
+from seerep.util.fb_helper import (
+    create_dataset_uuid_label,
+    create_label,
+    create_label_category,
+    createEmpty,
+    createTimeStamp,
+    createTimeInterval,
+    createQuery,
+)
 # from visual_utils import open3d_vis_utils as visualizer
 from utils import cxcy2xyxy
 
 logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
+
+class APIError(Exception):
+    pass
+
+
+class DatumaroError(Exception):
+    pass
 
 Point_Field_Datatype =  {
     0: 'unset',
@@ -97,7 +115,6 @@ class SEEREPChannel():
          socket: String, Port and IP address of seerep server
          seerep.robot.10.249.3.13.nip.io:32141
         """
-        # self._grpc_stub  = imageService.ImageServiceStub(self.channel)
         if self.modality == 'images':
             self._grpc_stub  = imageService.ImageServiceStub(self.channel)
         elif self.modality == 'pointclouds':
@@ -322,59 +339,6 @@ class SEEREPChannel():
 
         #Query.AddLabel(builder, labelMsg)
         return labelMsg
-
-    def run_query(self, **kwargs):
-        projectuuidString = self._builder.CreateString(self._projectid)
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-
-        Query.Start(self._builder)
-        Query.AddProjectuuid(self._builder, projectuuidMsg)
-        # Query.AddWithoutdata
-        for key, value in kwargs.items():
-            if key == "bb": Query.AddBoundingbox(self._builder, value)
-            if key == "ti": Query.AddTimeinterval(self._builder, value)
-
-        queryMsg = Query.End(self._builder)
-
-        self._builder.Finish(queryMsg)
-        buf = self._builder.Output()
-        
-        data = []
-        sample = {}
-
-        for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
-            print('[INFO] Receiving images . . .')
-            response = Image.Image.GetRootAs(responseBuf)
-            # this should not be inside the loop
-            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
-            sample['uuid'] = self._msguuid
-            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), 3))
-            nbbs = response.LabelsBbLength()
-            sample['boxes'] = nbbs
-            for category in range(response.LabelsBbLength()):
-                logger.info("Category name: {}".format(response.LabelsBb(category).Category().decode("utf-8")))
-                for x in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
-                    logger.info(f"uuidmsg: {response.Header().UuidMsgs().decode('utf-8')}")
-                    logger.info("first label: " + response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Label().decode("utf-8") 
-                        + " ; confidence: " 
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Confidence())
-                        )
-                    logger.info(
-                        "bounding box number (Xcenter,Ycenter,Xextent,Yextent):"
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().CenterPoint().X())
-                        + " "
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().CenterPoint().Y())
-                        + " "
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().SpatialExtent().X())
-                        + " "
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().SpatialExtent().Y())
-                        + "\n"
-                    )
-            data.append(sample)
-            sample={}
-        return data
     
     def annotation_dict(self, format='aitf'):
         anns_dict = {}
@@ -408,6 +372,9 @@ class SEEREPChannel():
 
     def run_query_images(self, *args):
         projectUuids = [self._projectid]
+        timeMin = createTimeStamp(self._builder, 1687445582, 0)
+        timeMax = createTimeStamp(self._builder, 1687445586, 0)
+        timeInterval = createTimeInterval(self._builder, timeMin, timeMax)
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
@@ -415,16 +382,17 @@ class SEEREPChannel():
             # labels=labelCategory,
             # mustHaveAllLabels=False,
             projectUuids=projectUuids,
+            timeInterval=timeInterval,
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
             # withoutData=False,
-            # sortByTime=True,  # from version 0.2.5 onwards
+            sortByTime=True,  # from version 0.2.5 onwards
         )
         self._builder.Finish(queryMsg)
         buf = self._builder.Output()
         data = []
-        sample = {}
         for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
+            sample = {}
             logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
@@ -434,7 +402,7 @@ class SEEREPChannel():
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
             sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
             sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
-            tmp = sample['image']
+            # tmp = sample['image']
             # if sample['image'].shape[2] == 4:
             #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_A2BGR)
             #     # tmp = tmp[:, :, 0:3]    # ignore last channel for visualization
@@ -487,8 +455,7 @@ class SEEREPChannel():
             #     cv2.imshow(self.source_window, tmp)
             #     cv2.waitKey(0)    
             #     tmp = None
-            data.append(sample)
-            sample={}
+            data.append(sample.copy())
         logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
         if self.vis:
             cv2.destroyWindow(self.source_window)
@@ -609,67 +576,109 @@ class SEEREPChannel():
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data
     
-    def sendboundingbox(self, sample: dict, annotations: dict, category: str):
-        header = util_fb.createHeader(
-            self._builder,
-            projectUuid = self._projectid,
-            msgUuid= sample['uuid']
-        )
+    def send_annotations(self, annotations):
+        for sample in annotations:
+            header = util_fb.createHeader(
+                self._builder,
+                projectUuid = self._projectid,
+                msgUuid= sample['uuid']
+            )
 
-        label_id_map = {idx: item for idx, item in enumerate(annotations["categories"]["label"]["labels"])}
-        for item in annotations['items']:
-            labels = [
-                    util_fb.create_label(self._builder, label_id_map[label_id]["name"], label_id)
-                    for label_id in annotations
-                ]
+            label_id_map = {idx: item for idx, item in enumerate(annotations["categories"]["label"]["labels"])}
+            for item in sample['annotations']['items']:
+                labels = [
+                        util_fb.create_label(self._builder, label_id_map[label_id]["name"], label_id)
+                        for label_id in annotations
+                    ]
 
-            category_labels = util_fb.create_label_category(self._builder, labels, json.dumps(item), "CVAT")
+                category_labels = util_fb.create_label_category(self._builder, labels, json.dumps(item), "RetinaNet")
 
-        # TODO can we send boxes to existing images or not?
-        # image = util_fb.createImage(
-        #         self._builder, image_data, header, "rgb16", True, CAMERA_INTRINSIC_UUID, [category_labels]
-        #     )
+            # TODO can we send boxes to existing images or not?
+            image = util_fb.createImage(
+                    self._builder, 
+                    sample['image'], 
+                    header, "rgb16", True, 
+                    "fa2f27e3-7484-48b0-9f21-ec362075baca", 
+                    [category_labels]
+                )
 
-        # self._builder.Finish(image)
+            self._builder.Finish(image)
+            yield bytes(self._builder.Output())
+            
+    def send_dataset(self, data):
+        """
+            Send a Datumaro dataset to SEEREP.
 
-        yield bytes(self._builder.Output())
-        # boundingBoxes = util_fb.createBoundingBoxes2d(
-        #     self._builder,
-        #     [util_fb.createPoint2d(self._builder, bb[0][0], bb[0][1]) for bb in bbs],
-        #     [util_fb.createPoint2d(self._builder, bb[1][0], bb[1][1]) for bb in bbs],
-        # )
-        # if model_name == "ground_truth":
-        #     labelWithInstances = util_fb.createLabelsWithInstance(
-        #     self._builder,
-        #     [label for label in labels],
-        #     [1.0 for conf in confidences],
-        #     [str(uuid.uuid4()) for _ in range(len(bbs))],
-        #     )
-        # else:   
-        #     labelWithInstances = util_fb.createLabelsWithInstance(
-        #     self._builder,
-        #     [label for label in labels],
-        #     [conf for conf in confidences],
-        #     [str(uuid.uuid4()) for _ in range(len(bbs))],
-        #     )
-        # labelsBb = util_fb.createBoundingBoxes2dLabeled(self._builder, labelWithInstances, boundingBoxes)
+            Args:
+                project_name (str): Name for the SEEREP project to create from the dataset.
+                dataset_path (str, optional): Path to the Datumaro dataset base directory \
+                    (one level up from the 'images' directory). Defaults to the current directory.
 
-        # boundingBox2DLabeledWithCategory = util_fb.createBoundingBox2DLabeledWithCategory(
-        #     self._builder, self._builder.CreateString(model_name), labelsBb
-        # )
+            Returns:
+                str: The UUID of the created SEEREP project.
 
-        # labelsBbVector = util_fb.createBoundingBox2dLabeledStamped(self._builder, header, [boundingBox2DLabeledWithCategory])
-        # self._builder.Finish(labelsBbVector)
-        # buf = self._builder.Output()
+            Raises:
+                FileNotFoundError: If the Datumaro dataset base directory does not exist.
+                APIError: If there is an error sending the dataset.
 
-        # msg = [bytes(buf)]
-
-        # send_channel, _, _, _ = self.secondary_channel()
-        # try:
-        #     ret = send_channel.AddBoundingBoxes2dLabeled( iter(msg) )
-        # except Exception as e:
-        #     logger.error(e)   
-
+            """
+        image_stub, grpc_stubmeta, builder, projectid = self.secondary_channel()
+        query = util_fb.createQuery(
+                            builder,
+                            projectUuids=[projectid],
+                            withoutData=True,
+                        )
+        builder.Finish(query)
+        buffer = builder.Output()
+        response_ls: List = list(image_stub.GetImage(bytes(buffer)))
+        if not response_ls:
+            print("""
+                No images found. Please create a project with labeled images
+                using gRPC_pb_sendLabeledImage.py first.
+            """)
+            sys.exit()
+        msgToSend = []
+        label_list: List[Tuple[str, bytearray]] = []
+        for responseBuf in response_ls:
+            response = Image.Image.GetRootAs(responseBuf)
+            img_uuid = response.Header().UuidMsgs().decode("utf-8")
+            labelStr = ["RetinaNet", "label2"]
+            labels = []
+            anns = [sample for sample in data if sample['uuid']==img_uuid][0]
+            # No objects exist in the current image according to ground truth
+            if len(anns['annotations']['items'][0]['annotations']) == 0:
+                pass
+            # There are gt annotations in the image
+            else:
+                # Ground truth exists AND predicted as well. 
+                if len(anns['annotations']['items']) > 1:
+                    for prediction in anns['annotations']['items'][1]['annotations']:  #0 belongs to ground_truth. TODO double check! 
+                        labels.append(create_label(builder=builder,
+                                                    label='person',
+                                                    label_id=int(prediction['label_id']),
+                                                    # instance_uuid=str(prediction['id']),
+                                                    # instance_id=int(prediction['id'])
+                                                    )) # TODO This comes from tracking? 
+                    labelsCategory = []
+                    labelsCategory.append(create_label_category(
+                                                builder=builder,
+                                                labels=labels,
+                                                datumaro_json=str(anns['annotations']['items'][1]), # must be string
+                                                category='RetinaNet'))  # TODO Fetch this dynamically with model_name
+                    dataset_uuid_label = create_dataset_uuid_label(builder=builder,
+                                                                    projectUuid=projectid,
+                                                                    datasetUuid=img_uuid,
+                                                                    labels=labelsCategory)
+                    builder.Finish(dataset_uuid_label)
+                    buf = builder.Output()
+                    label_list.append((img_uuid,buf))
+                    msgToSend.append(bytes(buf))  
+                # Ground truth found but no predictions were generated by the model aka 'category'
+                else:
+                    pass            
+        image_stub.AddLabels(iter(msgToSend))
+        return label_list
+        
 def main():
     schan = SEEREPChannel()
     ts = schan.gen_timestamp(1610549273, 1938549273)
