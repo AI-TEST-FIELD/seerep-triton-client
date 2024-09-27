@@ -567,10 +567,7 @@ class EvaluateInference(BaseInference):
             #         # child = False
             #         male = False
             # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
-            # TODO run evaluation without inference call
-            # seerep_channel.sendboundingbox(sample, annotations, self.model_name)
-            logger.info('Sent boxes for image under category name {}'.format(self.model_name))
-            
+            logger.info('Processed all inference requests in current data subset! ')
         return data
 
     def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):

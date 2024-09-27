@@ -20,7 +20,19 @@ from copy import copy
 from typing import Set, Tuple, List
 from scipy.spatial.transform import Rotation as R
 
-from seerep.fb import Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp, TRANSMISSION_STATE#, BoundingBoxes2DLabeledStamped
+from seerep.fb import (
+    Boundingbox, 
+    Empty, 
+    Header, 
+    Image, 
+    Point, 
+    ProjectInfos, 
+    Query, 
+    TimeInterval, 
+    Timestamp, 
+    TRANSMISSION_STATE,
+    LabelCategory
+)
 from seerep.fb import PointCloud2 as pc2
 from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
@@ -270,75 +282,6 @@ class SEEREPChannel():
         builder = flatbuffers.Builder(1024)
         
         return builder
-
-    def gen_boundingbox(self, start_coord, end_coord):
-        '''
-        Add a bounding box to the query builder
-        Args:
-            start_coord : An interable of the X, Y and Z start co ordinates of the point, in this order.
-            end_coord : An interable of the X, Y and Z end co ordinates of the point, in this order.
-        '''
-        
-        Point.Start(self._builder)
-        Point.AddX(self._builder, start_coord[0])
-        Point.AddY(self._builder, start_coord[1])
-        #Point.AddZ(self._builder, start_coord[2])
-        pointMin = Point.End(self._builder)
-
-        Point.Start(self._builder)
-        Point.AddX(self._builder, end_coord[0])
-        Point.AddY(self._builder, end_coord[1])
-        #Point.AddZ(self._builder, end_coord[2])
-        pointMax = Point.End(self._builder)
-
-        frameId = self._builder.CreateString("map")
-        Header.Start(self._builder)
-        Header.AddFrameId(self._builder, frameId)
-        header = Header.End(self._builder)
-
-        Boundingbox.Start(self._builder)
-        Boundingbox.AddPointMin(self._builder, pointMin)
-        Boundingbox.AddPointMax(self._builder, pointMax)
-        #Boundingbox.AddHeader(self._builder, header)
-        boundingbox = Boundingbox.End(self._builder)
-
-        #Query.AddBoundingbox(self._builder, boundingbox)
-        return boundingbox
-
-    def gen_timestamp(self, starttime, endtime):
-        '''
-        Add a time range to the query builder
-        Args:
-            starttime : Start time as an int
-            endtime : End time as an int
-        '''
-
-        Timestamp.Start(self._builder)
-        Timestamp.AddSeconds(self._builder, starttime)
-        Timestamp.AddNanos(self._builder, 0)
-        timeMin = Timestamp.End(self._builder)
-
-        Timestamp.Start(self._builder)
-        Timestamp.AddSeconds(self._builder, endtime)
-        Timestamp.AddNanos(self._builder, 0)
-        timeMax = Timestamp.End(self._builder)
-
-        TimeInterval.Start(self._builder)
-        TimeInterval.AddTimeMin(self._builder, timeMin)
-        TimeInterval.AddTimeMax(self._builder, timeMax)
-        timeInterval = TimeInterval.End(self._builder)
-
-        #Query.AddTimeinterval(self._builder, timeInterval)
-        return timeInterval
-
-    def gen_label(self, label):
-        label = builder.CreateString("1")
-        Query.StartLabelVector(builder, 1)
-        builder.PrependUOffsetTRelative(label)
-        labelMsg = builder.EndVector()
-
-        #Query.AddLabel(builder, labelMsg)
-        return labelMsg
     
     def annotation_dict(self, format='aitf'):
         anns_dict = {}
@@ -378,11 +321,10 @@ class SEEREPChannel():
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
-            # timeInterval=timeInterval,
-            # labels=labelCategory,
+            timeInterval=timeInterval,
+            # labels=['RetinaNet'],
             # mustHaveAllLabels=False,
             projectUuids=projectUuids,
-            timeInterval=timeInterval,
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
             # withoutData=False,
@@ -396,8 +338,6 @@ class SEEREPChannel():
             logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
-            # response.Header().Stamp().Seconds()
-            # response.Header().Stamp().Nanos()
             sample['uuid'] = self._msguuid
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
             sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
@@ -575,35 +515,6 @@ class SEEREPChannel():
                 break
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data
-    
-    def send_annotations(self, annotations):
-        for sample in annotations:
-            header = util_fb.createHeader(
-                self._builder,
-                projectUuid = self._projectid,
-                msgUuid= sample['uuid']
-            )
-
-            label_id_map = {idx: item for idx, item in enumerate(annotations["categories"]["label"]["labels"])}
-            for item in sample['annotations']['items']:
-                labels = [
-                        util_fb.create_label(self._builder, label_id_map[label_id]["name"], label_id)
-                        for label_id in annotations
-                    ]
-
-                category_labels = util_fb.create_label_category(self._builder, labels, json.dumps(item), "RetinaNet")
-
-            # TODO can we send boxes to existing images or not?
-            image = util_fb.createImage(
-                    self._builder, 
-                    sample['image'], 
-                    header, "rgb16", True, 
-                    "fa2f27e3-7484-48b0-9f21-ec362075baca", 
-                    [category_labels]
-                )
-
-            self._builder.Finish(image)
-            yield bytes(self._builder.Output())
             
     def send_dataset(self, data):
         """
@@ -623,9 +534,13 @@ class SEEREPChannel():
 
             """
         image_stub, grpc_stubmeta, builder, projectid = self.secondary_channel()
+        timeMin = createTimeStamp(builder, 1687445582, 0)
+        timeMax = createTimeStamp(builder, 1687445586, 0)
+        timeInterval = createTimeInterval(builder, timeMin, timeMax)
         query = util_fb.createQuery(
                             builder,
                             projectUuids=[projectid],
+                            timeInterval=timeInterval,
                             withoutData=True,
                         )
         builder.Finish(query)
@@ -639,7 +554,12 @@ class SEEREPChannel():
             sys.exit()
         msgToSend = []
         label_list: List[Tuple[str, bytearray]] = []
-        for responseBuf in response_ls:
+        for responseBuf in tqdm(response_ls,
+                                total=len(data),
+                                colour="GREEN",
+                                desc="Sending Predictions to SEEREP Server:",
+                                unit="predictions",
+                                ascii=True):
             response = Image.Image.GetRootAs(responseBuf)
             img_uuid = response.Header().UuidMsgs().decode("utf-8")
             labelStr = ["RetinaNet", "label2"]
@@ -647,7 +567,7 @@ class SEEREPChannel():
             anns = [sample for sample in data if sample['uuid']==img_uuid][0]
             # No objects exist in the current image according to ground truth
             if len(anns['annotations']['items'][0]['annotations']) == 0:
-                pass
+                pass    # TODO what if no ground truth but the box was detected? 
             # There are gt annotations in the image
             else:
                 # Ground truth exists AND predicted as well. 
@@ -656,14 +576,14 @@ class SEEREPChannel():
                         labels.append(create_label(builder=builder,
                                                     label='person',
                                                     label_id=int(prediction['label_id']),
-                                                    # instance_uuid=str(prediction['id']),
-                                                    # instance_id=int(prediction['id'])
-                                                    )) # TODO This comes from tracking? 
+                                                    instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                    instance_id=int(prediction['id'])
+                                                    )) 
                     labelsCategory = []
                     labelsCategory.append(create_label_category(
                                                 builder=builder,
                                                 labels=labels,
-                                                datumaro_json=str(anns['annotations']['items'][1]), # must be string
+                                                datumaro_json=json.dumps(anns['annotations']['items'][1]), # must be json encoded string not a regular string
                                                 category='RetinaNet'))  # TODO Fetch this dynamically with model_name
                     dataset_uuid_label = create_dataset_uuid_label(builder=builder,
                                                                     projectUuid=projectid,
@@ -681,8 +601,6 @@ class SEEREPChannel():
         
 def main():
     schan = SEEREPChannel()
-    ts = schan.gen_timestamp(1610549273, 1938549273)
-    schan.run_query(ti=ts)
 
 if __name__ == "__main__":
     main()
