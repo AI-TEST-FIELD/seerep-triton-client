@@ -9,6 +9,7 @@ scipy
 requests
 torchvision==0.15.2
 torch==2.0.1
+tqdm
 # 3D inference with OpenPCDet 
 # pyquaternion
 # easydict
