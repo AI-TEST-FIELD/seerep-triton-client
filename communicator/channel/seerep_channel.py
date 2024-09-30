@@ -360,11 +360,12 @@ class SEEREPChannel():
                 "items": [],
             }
             labels: Set[Tuple[str, int]] = set()
-            for label_idx in range(response.LabelsLength()):
+            for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
                 category_with_labels = response.Labels(label_idx)
                 item = json.loads(category_with_labels.DatumaroJson().decode())
+                sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
                 sample['annotations']["items"].append(item)
-                for j in range(category_with_labels.LabelsLength()):
+                for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
                     labels.add(
                         (
                             category_with_labels.Labels(j).Label().decode(),
