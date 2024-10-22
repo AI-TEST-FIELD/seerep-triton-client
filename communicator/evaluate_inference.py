@@ -119,6 +119,8 @@ class EvaluateInference(BaseInference):
         self.bag_processed = False
         self.gt_processed = False
         self.img_processed = False
+        self.processed_counter = 0
+        self.no_gt_counter = 0
 
     def _register_inference(self):
         """
@@ -442,8 +444,10 @@ class EvaluateInference(BaseInference):
                 unit="requests",
                 ascii=True,
             ):
-                if self.model_name in sample['annotations']['categories']['label']['labels']:
-                    pass
+                if sample['processed']:
+                    self.processed_counter += 1
+                elif sample['no_grountruth']:
+                    self.no_gt_counter += 1
                 else:
                     predictions = {
                     'annotations':[],
@@ -550,27 +554,9 @@ class EvaluateInference(BaseInference):
                     cv2.waitKey() 
             if self.viz:
                 cv2.destroyWindow(self.winname) 
-            # child = False
-            # male = False
-            # adults = []
-            # with open('evaluation_list.txt', 'w') as f:
-            #     for sample in data: 
-            #         # Find at least one adult male dummy 
-            #         adults = [i[4] for i in sample['boxes']]
-            #         if 1 in adults:
-            #             for det in sample['boxes']:
-            #                 # Adult == 1 Child == 2
-            #                 if det[4] == 1 and det[6] > 0.2: # check if adult and IoU greater than 40 percent
-            #                     male = True
-            #                 # elif det[4] == 2 and det[6] > 0.3:    # TODO need to add more intelligent and thorough checks for child class
-            #                 #     child = True
-            #             f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], int(male)))  
-            #         else:                 # No male dummy exists in the ground truth
-            #             f.writelines('{} {} {}\n'.format(sample['timestamp'][0], sample['timestamp'][1], -1)) 
-            #         # child = False
-            #         male = False
-            # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
-            logger.info('Processed all inference requests in current data subset! ')
+            logger.info('Processed all inference requests in current data subset!')
+            logger.info('{} were skipped since predictions were already stored from previous runs'.format(self.processed_counter))
+            logger.info('{} image had no ground truth associated with them.'.format(self.no_gt_counter))
         return data
 
     def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
@@ -626,7 +612,7 @@ class EvaluateInference(BaseInference):
         # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
         sample_type = "image"
         if sample_type == "image":
-            data = schan.run_query_images(self.args.semantics)
+            data = schan.run_query_images(self.model_name)
             data = self.process_images(data)
             # Send predictions back to SEEREP for future use
             schan.send_dataset(data, category=self.model_name)
