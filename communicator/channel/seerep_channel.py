@@ -517,7 +517,7 @@ class SEEREPChannel():
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data
             
-    def send_dataset(self, data):
+    def send_dataset(self, data, category):
         """
             Send a Datumaro dataset to SEEREP.
 
@@ -563,7 +563,6 @@ class SEEREPChannel():
                                 ascii=True):
             response = Image.Image.GetRootAs(responseBuf)
             img_uuid = response.Header().UuidMsgs().decode("utf-8")
-            labelStr = ["RetinaNet", "label2"]
             labels = []
             anns = [sample for sample in data if sample['uuid']==img_uuid][0]
             # No objects exist in the current image according to ground truth
@@ -585,7 +584,7 @@ class SEEREPChannel():
                                                 builder=builder,
                                                 labels=labels,
                                                 datumaro_json=json.dumps(anns['annotations']['items'][1]), # must be json encoded string not a regular string
-                                                category='RetinaNet'))  # TODO Fetch this dynamically with model_name
+                                                category=category))  # TODO Fetch this dynamically with model_name
                     dataset_uuid_label = create_dataset_uuid_label(builder=builder,
                                                                     projectUuid=projectid,
                                                                     datasetUuid=img_uuid,
