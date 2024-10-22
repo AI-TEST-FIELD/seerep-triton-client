@@ -315,13 +315,13 @@ class SEEREPChannel():
 
     def run_query_images(self, *args):
         projectUuids = [self._projectid]
-        timeMin = createTimeStamp(self._builder, 1687445582, 0)
-        timeMax = createTimeStamp(self._builder, 1687445586, 0)
-        timeInterval = createTimeInterval(self._builder, timeMin, timeMax)
+        # timeMin = createTimeStamp(self._builder, 1687445582, 0)
+        # timeMax = createTimeStamp(self._builder, 1687445586, 0)
+        # timeInterval = createTimeInterval(self._builder, timeMin, timeMax)
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
-            timeInterval=timeInterval,
+            # timeInterval=timeInterval,
             # labels=['RetinaNet'],
             # mustHaveAllLabels=False,
             projectUuids=projectUuids,
@@ -535,13 +535,13 @@ class SEEREPChannel():
 
             """
         image_stub, grpc_stubmeta, builder, projectid = self.secondary_channel()
-        timeMin = createTimeStamp(builder, 1687445582, 0)
-        timeMax = createTimeStamp(builder, 1687445586, 0)
-        timeInterval = createTimeInterval(builder, timeMin, timeMax)
+        # timeMin = createTimeStamp(builder, 1687445582, 0)
+        # timeMax = createTimeStamp(builder, 1687445586, 0)
+        # timeInterval = createTimeInterval(builder, timeMin, timeMax)
         query = util_fb.createQuery(
                             builder,
                             projectUuids=[projectid],
-                            timeInterval=timeInterval,
+                            # timeInterval=timeInterval,
                             withoutData=True,
                         )
         builder.Finish(query)
