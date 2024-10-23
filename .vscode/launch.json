@@ -13,24 +13,25 @@
                 // "--channel-triton", "localhost:8001",
                 // "--channel-seerep", "localhost:9090",
                 "-cT", "10.249.3.13:8001",
-                "-cS", "agrigaia-ur.ni.dfki:9090",
+                // "-cS", "agrigaia-ur.ni.dfki:9090",
+                "-cS", "172.30.0.1:9090",
                 // "--seerep-project", "aitf-triton-coco",
-                "--seerep-project", "Test_2023_06_22_2024-08-27-10-12-19_0.bag",
+                "--seerep-project", "Rye_20240508_2024-10-09-11-54-00_0",
                 "--log-level", "info",
                 // "--visualize",
                 // "--model-name", "frcnn_800",
                 // "--model-name", "dino_coco_600",
-                "--model-name", "retina_big",
+                // "--model-name", "retina_big",
                 // "--model-name", "yolov5m_iso_onnx",
-                // "--model-name", "yolov5m_coco",
+                "--model-name", "yolov5m_coco",
                 "--semantics",
                 // // "labelGeneral_sensors",
-                "person", 
+                "11",
                 // "apple",
                 // "Pedestrian",
                 // "Cyclist",
-                // "weatherGeneral_cloudy", 
-                // "weather_general_sun", 
+                // "weatherGeneral_cloudy",
+                // "weather_general_sun",
                 // "weatherGeneral_rain",
                 // "Source_Kitti",
                 // "Source_CoCo",
@@ -42,7 +43,48 @@
             "env": {
                 "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
             },
-            
+
+        },
+        {
+            "name": "AITF Inference",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./aitf_eval.py",
+            "args": [
+                // "--channel-triton", "localhost:8001",
+                // "--channel-seerep", "localhost:9090",
+                "-cT", "10.249.3.13:8001",
+                // "-cS", "agrigaia-ur.ni.dfki:9090",
+                "-cS", "172.30.0.1:9090",
+                // "--seerep-project", "aitf-triton-coco",
+                // "--seerep-project", "Rye_20240508_2024-10-09-11-54-00_0",
+                "--log-level", "info",
+                // "--visualize",
+                // "--model-name", "frcnn_800",
+                // "--model-name", "dino_coco_600",
+                // "--model-name", "retina_big",
+                // "--model-name", "yolov5m_iso_onnx",
+                // "--model-name", "yolov5m_coco",
+                "--semantics",
+                // // "labelGeneral_sensors",
+                "11",
+                // "apple",
+                // "Pedestrian",
+                // "Cyclist",
+                // "weatherGeneral_cloudy",
+                // "weather_general_sun",
+                // "weatherGeneral_rain",
+                // "Source_Kitti",
+                // "Source_CoCo",
+                // "occluded",
+                // "truncated",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
+            },
+
         },
         {
             "name": "Infer 3D",
@@ -69,7 +111,7 @@
                 "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python",
                 "XDG_RUNTIME_DIR":"/opt/client/.xdg"
             },
-            
+
         },
         {
             "name": "Ros listen",
@@ -81,7 +123,7 @@
             "env": {
                 "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
             },
-            
+
         },
         {
             "name": "Demo pcdet",
