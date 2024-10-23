@@ -21,15 +21,15 @@ from typing import Set, Tuple, List
 from scipy.spatial.transform import Rotation as R
 
 from seerep.fb import (
-    Boundingbox, 
-    Empty, 
-    Header, 
-    Image, 
-    Point, 
-    ProjectInfos, 
-    Query, 
-    TimeInterval, 
-    Timestamp, 
+    Boundingbox,
+    Empty,
+    Header,
+    Image,
+    Point,
+    ProjectInfos,
+    Query,
+    TimeInterval,
+    Timestamp,
     TRANSMISSION_STATE,
     LabelCategory
 )
@@ -77,13 +77,13 @@ class SEEREPChannel():
     """
     A SEEREPChannel is establishes a connection between the triton client and SEEREP.
     """
-    def __init__(self, 
-                 project_name='testproject', 
-                 socket='agrigaia-ur.ni.dfki:9090', 
+    def __init__(self,
+                 project_name='testproject',
+                 socket='agrigaia-ur.ni.dfki:9090',
                  modality='images',
                  format='coco',
                  visualize=False):
-        
+
         self._meta_data = {}
         self._grpc_stub = None
         self._grpc_stubmeta = None
@@ -120,7 +120,7 @@ class SEEREPChannel():
             channel = grpc.insecure_channel(self.socket) # use with local deployment
 
         return channel
-    
+
     def register_channel(self):
         """
          register grpc triton channel
@@ -132,7 +132,7 @@ class SEEREPChannel():
         elif self.modality == 'pointclouds':
             self._grpc_stub  = pointCloudService.PointCloudServiceStub(self.channel)
         # self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
-        self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel) 
+        self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
         self._builder = self.init_builder()
         self._msgUuid = None
         self._projectid = self.retrieve_project(self.projname, log=True)
@@ -145,7 +145,7 @@ class SEEREPChannel():
          seerep.robot.10.249.3.13.nip.io:32141
         """
         grpc_stub  = imageService.ImageServiceStub(self.channel)
-        grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)  
+        grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
         builder = self.init_builder()
         projectid = self._projectid
 
@@ -210,7 +210,7 @@ class SEEREPChannel():
             offset += l
             strs.append(sb)
         return (np.array(strs, dtype=np.object_))
-    
+
     def deserialize_bytes_int(self, encoded_tensor):
         strs = list()
         offset = 0
@@ -247,7 +247,7 @@ class SEEREPChannel():
                         duplicate = True
                     else:
                         logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
-                        projects[tmp] = response.Projects(i).Uuid().decode("utf-8")                
+                        projects[tmp] = response.Projects(i).Uuid().decode("utf-8")
                     # if response.Projects(i).Name().decode("utf-8") == projname:
                     #     curr_proj = tmp
                     #     projectuuid = response.Projects(i).Uuid().decode("utf-8")
@@ -280,9 +280,9 @@ class SEEREPChannel():
 
     def init_builder(self):
         builder = flatbuffers.Builder(1024)
-        
+
         return builder
-    
+
     def annotation_dict(self, format='aitf'):
         anns_dict = {}
         class_names= []
@@ -364,39 +364,40 @@ class SEEREPChannel():
             labels: Set[Tuple[str, int]] = set()
             for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
                 category_with_labels = response.Labels(label_idx)
-                item = json.loads(category_with_labels.DatumaroJson().decode())
-                sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
-                sample['annotations']["items"].append(item)
-                for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
-                    labels.add(
-                        (
-                            category_with_labels.Labels(j).Label().decode(),
-                            category_with_labels.Labels(j).LabelIdDatumaro(),
+                if(not (category_with_labels.Category().decode() == 'labelGeneral')):
+                    item = json.loads(category_with_labels.DatumaroJson().decode())
+                    sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
+                    sample['annotations']["items"].append(item)
+                    for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
+                        labels.add(
+                            (
+                                category_with_labels.Labels(j).Label().decode(),
+                                category_with_labels.Labels(j).LabelIdDatumaro(),
+                            )
                         )
-                    )
                 # For DEBUG
             #     if self.vis and len(sample['annotations']['items'][0]['annotations']) != 0:
             #         for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
             #             bbox = sample['annotations']['items'][0]['annotations'][ann_idx]['bbox']
             #             bbox = cxcy2xyxy(bbox)
             #             label = int(sample['annotations']["items"][0]['annotations'][ann_idx]['id'])
-            #             cv2.rectangle(tmp, 
-            #                             (bbox[0], bbox[1]), 
-            #                             (bbox[2], bbox[3]), 
+            #             cv2.rectangle(tmp,
+            #                             (bbox[0], bbox[1]),
+            #                             (bbox[2], bbox[3]),
             #                             (255, 0, 0), 2)
             #             (tw, th), _ = cv2.getTextSize(self.ann_dict[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-            #             cv2.rectangle(tmp, 
-            #                             (bbox[0], bbox[1] - 25), 
-            #                             (bbox[0] + tw, bbox[1]), 
+            #             cv2.rectangle(tmp,
+            #                             (bbox[0], bbox[1] - 25),
+            #                             (bbox[0] + tw, bbox[1]),
             #                             (255, 0, 0), -1)
-            #             cv2.putText(tmp, 
-            #                         self.ann_dict[label], 
-            #                         (bbox[0], bbox[1] - 5), 
-            #                         cv2.FONT_HERSHEY_SIMPLEX, 
+            #             cv2.putText(tmp,
+            #                         self.ann_dict[label],
+            #                         (bbox[0], bbox[1] - 5),
+            #                         cv2.FONT_HERSHEY_SIMPLEX,
             #                         0.9, (255,255,255), 2)
-            # if self.vis: 
+            # if self.vis:
             #     cv2.imshow(self.source_window, tmp)
-            #     cv2.waitKey(0)    
+            #     cv2.waitKey(0)
             #     tmp = None
             # This condition makes sure we do not predict the labels twice and send them back again to SEEREP
             if model_name in sample['annotations']['categories']['label']['labels']:
@@ -408,7 +409,7 @@ class SEEREPChannel():
         if self.vis:
             cv2.destroyWindow(self.source_window)
         return data
-    
+
     def run_query_pointclouds(self, *args):
         projectuuidString = self._builder.CreateString(self._projectid)
         Query.StartProjectuuidVector(self._builder, 1)
@@ -431,7 +432,7 @@ class SEEREPChannel():
         buf = self._builder.Output()
         # Collect list of all data samples returned from SEEREP into data
         data = []
-        # Collect the UUIDs and data from each sample sent by SEEREP project. 
+        # Collect the UUIDs and data from each sample sent by SEEREP project.
         sample = {}
         # TODO the num_samples should be replaced by the total number of samples inside the seerep project
         num_samples = 100
@@ -469,23 +470,23 @@ class SEEREPChannel():
                 fields[response.Fields(j).Name().decode('utf-8')]['offset'] = response.Fields(j).Offset()
                 fields[response.Fields(j).Name().decode('utf-8')]['dtype'] = response.Fields(j).Datatype()
                 dtype = Point_Field_Datatype[response.Fields(j).Datatype()]
-                # https://docs.python.org/2/library/struct.html          
+                # https://docs.python.org/2/library/struct.html
                 if dtype == np.int16:    # 16 bit short
                     c = 'h'
                 elif dtype == np.uint16:    # 16 bit unsigned-short
                     c = 'H'
-                elif dtype == np.int32:    # 32 bit int 
+                elif dtype == np.int32:    # 32 bit int
                     c = 'i'
-                elif dtype == np.uint32:    # 32 bit unsigned int 
+                elif dtype == np.uint32:    # 32 bit unsigned int
                     c = 'I'
                 elif dtype == np.float32:   # 32 bit float
                     c = 'f'
-                elif dtype == np.float64:   # 64 bit double 
+                elif dtype == np.float64:   # 64 bit double
                     c = 'd'
-                else: 
+                else:
                     print('Invalid data type')
                 fields[response.Fields(j).Name().decode('utf-8')]['data_string'] = c
-                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c) 
+                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c)
             for field in fields:
                 strs = list()
                 for i in range(fields[field]['offset'], raw_data.shape[0], response.PointStep()):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
@@ -493,7 +494,7 @@ class SEEREPChannel():
                     strs.append(sb)
                 fields[field]['data'] = (np.array(strs, dtype=np.object_))
                 strs = []
-            sample['point_cloud'] = copy(fields) 
+            sample['point_cloud'] = copy(fields)
             if False:
                 from math import sin, cos
                 angle=15
@@ -503,11 +504,11 @@ class SEEREPChannel():
                 pc[:, 2] = fields['z']['data'][:, 0]
                 ry = R.from_euler('y', 30, degrees=True).as_matrix()
                 rz = R.from_euler('z', 90, degrees=True).as_matrix()
-                rotation_matrix = np.array([[cos(angle), 0, sin(angle)], 
-                                [0, 1, 0], 
+                rotation_matrix = np.array([[cos(angle), 0, sin(angle)],
+                                [0, 1, 0],
                                 [-sin(angle), 0, cos(angle)]])
-                # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509], 
-                #                             [0.01212522,  0.99957356,  0.02656451], 
+                # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509],
+                #                             [0.01212522,  0.99957356,  0.02656451],
                 #                             [-0.56296864, -0.01513165, 0.82633973]])
                 pc = np.matmul(ry, pc.T).T
                 pc = np.matmul(rz, pc.T).T
@@ -523,7 +524,7 @@ class SEEREPChannel():
                 break
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data
-            
+
     def send_dataset(self, data, category):
         """
             Send a Datumaro dataset to SEEREP.
@@ -568,13 +569,15 @@ class SEEREPChannel():
                                 desc="Sending Predictions to SEEREP Server:",
                                 unit="predictions",
                                 ascii=True):
+
             response = Image.Image.GetRootAs(responseBuf)
             img_uuid = response.Header().UuidMsgs().decode("utf-8")
             labels = []
             anns = [sample for sample in data if sample['uuid']==img_uuid][0]
+            category_groundtruth_index = anns['annotations']['categories']['label']['labels'].index('groundtruth')
             # No objects exist in the current image according to ground truth
-            if len(anns['annotations']['items'][0]['annotations']) == 0:
-                pass    # TODO what if no ground truth but the box was detected? 
+            if len(anns['annotations']['items'][category_groundtruth_index]['annotations']) == 0:
+                pass    # TODO what if no ground truth but the box was detected?
             # There are gt annotations in the image
             else:
                 # Ground truth exists AND predicted as well already from a previous run
@@ -583,18 +586,22 @@ class SEEREPChannel():
                 # Ground truth exists AND predicted in the current run and will be sent back to SEEREP
                 else:
                     if len(anns['annotations']['items']) > 1:
-                        for prediction in anns['annotations']['items'][1]['annotations']:  #0 belongs to ground_truth. TODO double check! 
+                        # category_model_index = anns['annotations']['categories']['label']['labels'].index(category)
+                        for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
                             labels.append(create_label(builder=builder,
                                                         label='person',
+
+
+
                                                         label_id=int(prediction['label_id']),
                                                         instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
                                                         instance_id=int(prediction['id'])
-                                                        )) 
+                                                        ))
                         labelsCategory = []
                         labelsCategory.append(create_label_category(
                                                     builder=builder,
                                                     labels=labels,
-                                                    datumaro_json=json.dumps(anns['annotations']['items'][1]), # must be json encoded string not a regular string
+                                                    datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
                                                     category=category))  # TODO Fetch this dynamically with model_name
                         dataset_uuid_label = create_dataset_uuid_label(builder=builder,
                                                                         projectUuid=projectid,
@@ -603,16 +610,15 @@ class SEEREPChannel():
                         builder.Finish(dataset_uuid_label)
                         buf = builder.Output()
                         label_list.append((img_uuid,buf))
-                        msgToSend.append(bytes(buf))  
+                        msgToSend.append(bytes(buf))
                     # Ground truth found but no predictions were generated by the model aka 'category'
                     else:
-                        pass            
+                        pass
         image_stub.AddLabels(iter(msgToSend))
         return label_list
-        
+
 def main():
     schan = SEEREPChannel()
 
 if __name__ == "__main__":
     main()
-
