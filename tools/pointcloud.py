@@ -49,13 +49,13 @@ def pcd_ros_to_o3d(
     o3d_pcd.point["positions"] = o3d.core.Tensor(
         tmp_positions, device=o3d_device, dtype=o3d.core.Dtype.Float32
     )
-    
+
     o3d_pcd.point[feature_field] = o3d.core.Tensor(
-        ros_pcd[feature_field]["data"].astype(np.float32),
+        ros_pcd[feature_field]["data"].astype(np.float32)/255,
         device=o3d_device,
         dtype=o3d.core.Dtype.Float32,
     )
-
+    print("Max intensity %s " % max(ros_pcd[feature_field]["data"].astype(np.float32)/255))
     return o3d_pcd
 
 

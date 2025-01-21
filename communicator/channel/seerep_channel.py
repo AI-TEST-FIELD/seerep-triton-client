@@ -135,7 +135,7 @@ class SEEREPChannel():
         self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
         self._builder = self.init_builder()
         self._msgUuid = None
-        self._projectid = self.retrieve_project(self.projname, log=True)
+        # self._projectid = self.retrieve_project(self.projname, log=True)
 
     def secondary_channel(self):
         """
@@ -324,7 +324,7 @@ class SEEREPChannel():
             # timeInterval=timeInterval,
             # labels=['RetinaNet'],
             # mustHaveAllLabels=False,
-            projectUuids=projectUuids,
+            # projectUuids=projectUuids,
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
             # withoutData=False,
@@ -411,18 +411,18 @@ class SEEREPChannel():
         return data
 
     def run_query_pointclouds(self, *args):
-        projectuuidString = self._builder.CreateString(self._projectid)
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-        projectUuids = [projectuuidString]
+        # projectuuidString = self._builder.CreateString(self._projectid)
+        # Query.StartProjectuuidVector(self._builder, 1)
+        # self._builder.PrependUOffsetTRelative(projectuuidString)
+        # projectuuidMsg = self._builder.EndVector()
+        # projectUuids = [projectuuidString]
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
             # timeInterval=timeInterval,
             # labels=labelCategory,
             # mustHaveAllLabels=False,
-            projectUuids=projectUuids,
+            # projectUuids=projectUuids,
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
             withoutData=False,

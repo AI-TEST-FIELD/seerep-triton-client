@@ -50,7 +50,7 @@ def parse_args():
                         type=str,
                         required=False,
                         default="aitf-triton-data",
-                        choices=['yolov5m_coco', 'frcnn_800', 'dino_coco_600_squared', 'dino_coco_800','retina_big', 'second_iou'],
+                        choices=['yolov5m_coco', 'frcnn_800', 'dino_coco_600_squared', 'dino_coco_800','retina_big', 'second_iou', 'pointpillar_kitti'],
                         help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
     parser.add_argument('-x',
                         '--model-version',
@@ -99,4 +99,4 @@ if __name__ == '__main__':
 
     #define inference
     evaluation = EvaluateInference(FLAGS, channel, client, format=format)
-    evaluation.start_inference(FLAGS.model_name)
+    evaluation.start_inference(FLAGS.model_name, modality="pointclouds")
