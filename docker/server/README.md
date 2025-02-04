@@ -1,6 +1,6 @@
 # Triton server with Det3D
 
-This Dockerfile builds a Triton server image with Det3D and spconv to run 3D detectors with python backend.
+This Dockerfile builds a Triton server image with OpenPCDet and spconv to run 3D detectors with python backend.
 
 ## Usage
 
