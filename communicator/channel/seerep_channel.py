@@ -135,7 +135,7 @@ class SEEREPChannel():
         self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
         self._builder = self.init_builder()
         self._msgUuid = None
-        # self._projectid = self.retrieve_project(self.projname, log=True)
+        self._projectid = self.retrieve_project(self.projname, log=True)
 
     def secondary_channel(self):
         """
@@ -248,16 +248,16 @@ class SEEREPChannel():
                     else:
                         logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
                         projects[tmp] = response.Projects(i).Uuid().decode("utf-8")
-                    # if response.Projects(i).Name().decode("utf-8") == projname:
-                    #     curr_proj = tmp
-                    #     projectuuid = response.Projects(i).Uuid().decode("utf-8")
+                    if response.Projects(i).Name().decode("utf-8") == projname:
+                        curr_proj = tmp
+                        projectuuid = response.Projects(i).Uuid().decode("utf-8")
                 except Exception as e:
                     logger.error(e)
-            # else:
-            #     try:
-            #         projectuuid = response.Projects(i).Uuid().decode("utf-8")
-            #     except Exception as e:
-            #         logger.error(e)
+            else:
+                try:
+                    projectuuid = response.Projects(i).Uuid().decode("utf-8")
+                except Exception as e:
+                    logger.error(e)
         if projname in projects:
             curr_proj = projname
             projectuuid = projects[curr_proj]
@@ -411,6 +411,7 @@ class SEEREPChannel():
         return data
 
     def run_query_pointclouds(self, *args):
+        projectUuids = [self._projectid]
         # projectuuidString = self._builder.CreateString(self._projectid)
         # Query.StartProjectuuidVector(self._builder, 1)
         # self._builder.PrependUOffsetTRelative(projectuuidString)
@@ -422,7 +423,7 @@ class SEEREPChannel():
             # timeInterval=timeInterval,
             # labels=labelCategory,
             # mustHaveAllLabels=False,
-            # projectUuids=projectUuids,
+            projectUuids=projectUuids,
             # instanceUuids=instanceUuids,
             # dataUuids=dataUuids,
             withoutData=False,
@@ -435,17 +436,14 @@ class SEEREPChannel():
         # Collect the UUIDs and data from each sample sent by SEEREP project.
         sample = {}
         # TODO the num_samples should be replaced by the total number of samples inside the seerep project
-        num_samples = 100
-        for responseBuf, curr_sample in tqdm(zip(self._grpc_stub.GetPointCloud2(bytes(buf)),
-                                    range(num_samples)),
-                                    total=num_samples,
-                                    colour='GREEN',
-                                    # file=tqdm_out,
-                                    desc='Receiving pointclouds from the SEEREP server',
-                                    unit=" samples"):
+        num_samples = 1E10
+        curr_sample = 0
+        for responseBuf in self._grpc_stub.GetPointCloud2(bytes(buf)):
             # logger.info('Receiving pointclouds from the SEEREP server')
             response = pc2.PointCloud2.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
+            seconds = response.Header().Stamp().Seconds()
+            nanos = response.Header().Stamp().Nanos()
             height = response.Width()
             width = response.Height()
             # TODO change the decoding to numpy for cleaner implementation
@@ -462,6 +460,7 @@ class SEEREPChannel():
             # reshaped_data = np.reshape(decoded_payload, (response.Height(), response.Width()))
 
             sample['uuid'] = self._msguuid
+            sample['time'] = {'seconds' : seconds, 'nanos': nanos}
             raw_data = response.DataAsNumpy()
             fields = {}
             dtype = None
@@ -520,7 +519,7 @@ class SEEREPChannel():
             # flush the sample data for new incoming samples
             sample={}
             curr_sample+=1
-            if curr_sample==0:
+            if curr_sample>=num_samples:
                 break
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         return data

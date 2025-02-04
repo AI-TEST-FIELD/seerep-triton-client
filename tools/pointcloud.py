@@ -55,7 +55,7 @@ def pcd_ros_to_o3d(
         device=o3d_device,
         dtype=o3d.core.Dtype.Float32,
     )
-    print("Max intensity %s " % max(ros_pcd[feature_field]["data"].astype(np.float32)/255))
+    # print("Max intensity %s " % max(ros_pcd[feature_field]["data"].astype(np.float32)/255))
     return o3d_pcd
 
 

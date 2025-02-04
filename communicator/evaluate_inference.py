@@ -26,6 +26,9 @@ from tools.seerep2coco import COCO_SEEREP
 from logger import Client_logger, TqdmToLogger
 from utils import cxcy2xyxy, xyxy2cxcy
 from visual_utils import open3d_vis_utils as visualizer
+import json
+
+VIZUALIZE_PCL = False
 
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
@@ -315,10 +318,16 @@ class EvaluateInference(BaseInference):
         # dictionary for sensor and dataset transformations
         TRANSFORM_DICT = {
             "base_transformation": {
+                # "ouster": [
+                #     [0.82638931, -0.02497454, 0.56254509, 0.191287],
+                #     [0.01212522, 0.99957356, 0.02656451, -0.35169424],
+                #     [-0.56296864, -0.01513165, 0.82633973, 1.90064396],
+                #     [0.0, 0.0, 0.0, 1.0],
+                # ],
                 "ouster": [
-                    [0.82638931, -0.02497454, 0.56254509, 0.191287],
-                    [0.01212522, 0.99957356, 0.02656451, -0.35169424],
-                    [-0.56296864, -0.01513165, 0.82633973, 1.90064396],
+                    [0.9254729,  0.0000000,  0.3788137,  1.213],
+                    [0.0000000,  1.0000000,  0.0000000, 0.0],
+                    [-0.3788137,  0.0000000,  0.9254729, 1.707],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
                 "velodyne": [
@@ -365,7 +374,7 @@ class EvaluateInference(BaseInference):
         self.pc = preprocessed_np_pcd
         return preprocessed_np_pcd
 
-    def seerep_infer_pc(self, pointclouds: np.array):
+    def seerep_infer_pc(self, pointclouds: np.array, visualize = True):
         self.preprocess_pc(
             ros_pcd=pointclouds, sensor_name="velodyne", dataset_name="kitti"
         )
@@ -416,18 +425,60 @@ class EvaluateInference(BaseInference):
         box_array, scores, labels = self.client_postprocess.extract_boxes(
             self.channel.response
         )
-        print(box_array)
+        pred= [box_array, scores, labels]
         # Show only persons above given confidence threshold
-        indices = np.where((scores >= 0.4) )[0].tolist()
+        indices =  np.where((labels == 2) & (scores > 0.4))[0].tolist()
         # indices = [i for i in range(len(labels))]
 
-        if True:
+        if len(indices)>0 and visualize:
             visualizer.draw_scenes(
                 points=self.pc["points"],
                 ref_boxes=box_array[indices, :],
                 ref_scores=scores[indices],
                 ref_labels=labels[indices],
             )
+        return self.to_datumaro_item(pred)
+
+    def to_datumaro_item(self, pred) -> dict:
+        """_summary_
+
+        Args:
+            pred (list): List with lists of bbox, label, score with bbox =[[x1,y1,z1,x2,y2,z2], ...]
+
+        Returns:
+            dict: datumaro item
+        """
+        item = {'id': "", 'annotations':[]}
+        annotation = {
+            'bbox':[],
+            'id':'1',
+            'label_id':'',
+            'score':1,
+        }
+        for obj in range(len(pred[1])):
+            center, extend = (pred[0][obj, 0], pred[0][obj, 1], pred[0][obj, 2]), \
+                                (pred[0][obj, 3], pred[0][obj, 4], pred[0][obj, 5])
+            x, y, z, w, h, d = (
+                np.round(center[0], 4),
+                np.round(center[1], 4),
+                np.round(center[2], 4),
+                abs(np.round(extend[0], 4)),
+                abs(np.round(extend[1], 4)),
+                abs(np.round(extend[2], 4)),
+            )
+            w > 0 and h > 0 and d > 0
+            annotation['bbox'] = [np.float64(x), np.float64(y), np.float64(z), np.float64(w), np.float64(h), np.float64(d)]
+            annotation['score'] = np.float64(np.round(pred[1][obj], 2))
+            annotation['id'] = str(int(pred[2][obj]))
+            item['annotations'].append(annotation)
+            annotation = {
+                'bbox':[],
+                'id':'1',
+                'label_id':'',
+                'score':1,
+            }
+
+        return item
 
     def process_images(self, data):
         t2 = time.time()
@@ -570,6 +621,10 @@ class EvaluateInference(BaseInference):
     def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
         # traverse through the samples
         infer_array = np.zeros(len(data), dtype=np.float16)
+        datumaro_results = {'items': [],
+                'dm_format_version':1,
+                'info':{'task':self.args.seerep_project}
+                    }
         for sample, idx in tqdm(
             zip(data, range(len(data))),
             total=len(data),
@@ -578,35 +633,19 @@ class EvaluateInference(BaseInference):
             desc="Sending inference request to Triton",
             unit="request",
         ):
+
             # perform an inference on each image, iteratively
             t3 = time.time()
-            pred = self.seerep_infer_pc(sample["point_cloud"])
+            visualize= VIZUALIZE_PCL
+            item = self.seerep_infer_pc(sample["point_cloud"], visualize)
+            item["id"] = sample["uuid"]
+            item["attr"] = {"timestamp": sample["time"]}
+            datumaro_results['items'].append(item)
             t4 = time.time()
             infer_array[idx] = t4 - t3
             # logger.info('Inference time: {}'.format(t4 - t3))
-            sample["predictions"] = []
-            bbs = []
-            labels = []
-            confidences = []
-            # traverse the predictions for the current pointclouds
-            # for obj in range(len(pred[1])):
-            #     pass
-            # if self.viz:
-            #     pass
-            # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
-            # TODO run evaluation without inference call
-            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
-            # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
-        # Convert groundtruth and predictions to PyCOCO format for evaluation
-        # logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
-        # t5 = time.time()
-        # coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
-        # cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
-        # cocoEval.evaluate()
-        # cocoEval.accumulate()
-        # cocoEval.summarize()
-        # t6 = time.time()
-        # logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
+        return datumaro_results
+
 
     def start_inference(self, model_name, format="coco", modality="images"):
         schan = seerep_channel.SEEREPChannel(
@@ -626,7 +665,10 @@ class EvaluateInference(BaseInference):
             schan.send_dataset(data, category=self.model_name)
         elif sample_type == "pointclouds":
             data = schan.run_query_pointclouds(self.args.semantics)
-            self.process_pc(data, schan)
+            results = self.process_pc(data, schan)
+
+            with open("%s.json" % self.args.seerep_project.split(".")[0], "w") as result_file:
+                json.dump(results, result_file)
 
     def _scale_boxes(self, box, normalized=False):
         """
