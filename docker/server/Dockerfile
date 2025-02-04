@@ -27,10 +27,10 @@ ENV PATH=$PATH:$CUDA_HOME/bin
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64
 
 # Install PyTorch first
-RUN python3 -m pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 -f https://download.pytorch.org/whl/torch_stable.html
+RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 -f https://download.pytorch.org/whl/torch_stable.html
 
 # Install other dependencies
-RUN python3 -m pip install numpy==1.23.5 \
+RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install numpy==1.23.5 \
     kornia==0.6.8 \
     sharedarray \
     tqdm \
@@ -62,7 +62,7 @@ FROM nvcr.io/nvidia/tritonserver:22.12-py3
 COPY --from=builder /opt/dependencies/OpenPCDet /opt/dependencies/OpenPCDet
 
 # Copy and install requirements
-COPY docker/server_3d/requirements.txt /tmp/requirements.txt
+COPY docker/server/requirements.txt /tmp/requirements.txt
 
 # Install dependencies with pip cache
 RUN --mount=type=cache,target=/root/.cache/pip \

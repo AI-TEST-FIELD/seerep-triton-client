@@ -5,12 +5,12 @@ This Dockerfile builds a Triton server image with Det3D and spconv to run 3D det
 ## Usage
 
 ```bash
-sudo -H DOCKER_BUILDKIT=1 docker build -f docker/server_3d/Dockerfile --platform linux/amd64 -t niqbal996/triton-server:22.04-py3-PCDet .
+sudo -H DOCKER_BUILDKIT=1 docker build -f docker/server/Dockerfile --platform linux/amd64 -t niqbal996/triton-server:22.12-py3-PCDet .
 
 docker run -it --rm --runtime=nvidia --net=host --name \
 triton-server-3D --shm-size=256m -e PYTHONPATH=/opt/dependencies/OpenPCDet \
 -v/home/niqbal/model_repository/backup_repo:/opt/model_repo \
-niqbal996/triton-server:22.04-py3-PCDet tritonserver --model-repository=/opt/model_repo
+niqbal996/triton-server:22.12-py3-PCDet tritonserver --model-repository=/opt/model_repo
 ```
 
 # Dependencies 
