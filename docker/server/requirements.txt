@@ -1,0 +1,17 @@
+cython 
+tqdm
+spconv-cu118 
+kornia==0.6.8
+scikit-image==0.19.3
+numba==0.56.4
+sharedarray
+easydict
+pyquaternion
+pyyaml
+opencv-python
+opencv-contrib-python 
+av2==0.2.0
+tensorboardx
+--find-links https://download.pytorch.org/whl/torch_stable.html
+torch==1.13.1+cu117
+torchvision==0.14.1+cu117
