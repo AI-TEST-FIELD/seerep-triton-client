@@ -1,0 +1,19 @@
+seerep-grpc
+pycocotools
+fast-coco-eval
+tritonclient[all]
+imutils
+# 3D inference with OpenPCDet 
+pyquaternion
+numba==0.56.4
+scikit-image==0.19.3
+easydict
+kornia==0.6.8
+av2
+spconv-cu118
+tqdm
+pyyaml
+# visualization 
+open3d==0.18.0
+opencv-python==4.7.0.72
+opencv-contrib-python==4.7.0.72
