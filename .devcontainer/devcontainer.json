@@ -2,7 +2,12 @@
 	"name": "Triton Client Development Environment",
 	"build": {
 		"context": "..",
-		"dockerfile": "../docker/client/Dockerfile"
+		"dockerfile": "../docker/client/Dockerfile",
+		"args": {
+            "USERNAME": "${localEnv:USER}",
+            "USER_UID": "1000",
+            "USER_GID": "1000"
+        }
 	},
 	"runArgs": [
 		"--runtime=nvidia",
@@ -20,8 +25,9 @@
 			]
 		}
 	},
-	"remoteUser": "vscode",
+	"remoteUser": "${localEnv:USER}",
+	// "containerUser": "vscode",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
-	"workspaceFolder": "/workspace"
-	// "postCreateCommand": "pip install -e ."
+	"workspaceFolder": "/workspace",
+	"postCreateCommand": "echo 'Development container is ready!'"
 }

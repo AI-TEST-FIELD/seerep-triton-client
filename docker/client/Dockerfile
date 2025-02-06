@@ -32,12 +32,17 @@ ENV CUDA_HOME=/usr/local/cuda
 ENV PATH=$PATH:$CUDA_HOME/bin
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64
 
-# Create a non-root user (optional but recommended)
-ARG USERNAME=vscode
-ARG USER_UID=1000
-ARG USER_GID=$USER_UID
-RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME
+# Use build arguments to pass the current user's name and UID
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
+
+# Create a non-root user with the provided username and UID
+RUN groupadd --gid ${USER_GID} ${USERNAME} \
+    && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME}
+
+# Enable colored output in the shell
+ENV TERM=xterm-256color
 
 # Copy requirements files
 COPY requirements/*.txt /tmp/
