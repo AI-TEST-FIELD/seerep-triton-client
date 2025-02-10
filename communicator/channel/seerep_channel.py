@@ -20,7 +20,7 @@ from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
 
-from seerep.fb import BoundingBoxes2DLabeledStamped, Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
+from seerep.fb import Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
 from seerep.fb import PointCloud2 as pc2
 from seerep.fb import image_service_grpc_fb as imageService
 from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
