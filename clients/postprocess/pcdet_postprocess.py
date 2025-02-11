@@ -1,7 +1,7 @@
 from .base_postprocess import Postprocess
 import numpy as np
 # import struct
-# import os
+import os
 # import math
 # import time
 # import torch
@@ -9,12 +9,12 @@ import numpy as np
 
 class PCDetPostprocess(Postprocess):
     def __init__(self):
-        pass
+        self.config_path = os.path.join(os.environ['PROJECT_ROOT'], 'config', 'kitti.names')
 
     def postprocess(self):
         pass
 
-    def load_class_names(self, namesfile='/opt/client/config/kitti.names', dataset='KITTI'):
+    def load_class_names(self, dataset='KITTI'):
             """
             Load class names from a file.
 
@@ -26,7 +26,7 @@ class PCDetPostprocess(Postprocess):
                 list: List of class names.
             """
             class_names = []
-            with open(namesfile, 'r') as fp:
+            with open(self.config_path, 'r') as fp:
                 lines = fp.readlines()
             for line in lines:
                 line = line.rstrip()
