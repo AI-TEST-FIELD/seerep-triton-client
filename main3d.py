@@ -50,7 +50,7 @@ def parse_args():
                         type=str,
                         required=False,
                         default="aitf-triton-data",
-                        choices=['yolov5m_coco', 'frcnn_800', 'dino_coco_600_squared', 'dino_coco_800','retina_big', 'second_iou'],
+                        choices=['yolov5m_coco', 'frcnn_800', 'dino_coco_600_squared', 'dino_coco_800','retina_big', 'second_iou', 'pointpillar_kitti'],
                         help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
     parser.add_argument('-x',
                         '--model-version',
@@ -92,8 +92,8 @@ if __name__ == '__main__':
         format='kitti'
     else:
         format='coco'
+    
     client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
-
     #define channel
     channel = grpc_channel.GRPCChannel(FLAGS)
 

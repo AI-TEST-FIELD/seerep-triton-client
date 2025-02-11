@@ -45,17 +45,24 @@ class EvaluateInference(BaseInference):
         super().__init__(channel, client)
 
         self.image = None
-        # self.class_names = self.load_class_names()
         self.args = args
         self._register_inference()  # register inference based on type of client
         self.client_postprocess = client.get_postprocess()  # get postprocess of client
         self.client_preprocess = client.get_preprocess()
         self.model_name = client.model_name
         self.format = format
-        if "COCO" or "coco" in self.model_name:
+        if "COCO" in self.model_name or "coco" in self.model_name.lower():
             self.class_names = self.client_postprocess.load_class_names(dataset="COCO")
-        elif "CROP" in self.model_name:
+            self.modality = "image"
+            logger.info(f"Using COCO image modality for inference")
+        elif "CROP" in self.model_name or "crop" in self.model_name.lower():
             self.class_names = self.client_postprocess.load_class_names(dataset="CROP")
+            self.modality = "image"
+            logger.info(f"Using CROP image modality for inference")
+        elif "KITTI" in self.model_name or "kitti" in self.model_name.lower():
+            self.class_names = self.client_postprocess.load_class_names(dataset="KITTI")
+            self.modality = "pointcloud"
+            logger.info(f"Using KITTI pointcloud modality for inference")
         else:
             # TODO shutdown?
             self.class_names = None
@@ -132,33 +139,6 @@ class EvaluateInference(BaseInference):
             self.outputs["output_{}".format(i)].name = output["name"]
             # assign the gathered model outputs to the grpc channel
             self.channel.request.outputs.extend([self.outputs["output_{}".format(i)]])
-
-        # self.input_size = [h, w]
-        # if format == mc.ModelInput.FORMAT_NHWC:
-        #     self.channel.input.shape.extend([h, w, c])
-        # else:
-        #     self.channel.input.shape.extend([c, h, w])
-
-        # if len(output_name) > 1:  # Models with multiple outputs Boxes, Classes and scores
-        #     self.output0 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # boxes
-        #     self.output0.name = output_name[0]
-        #     self.output1 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # class_IDs
-        #     self.output1.name = output_name[1]
-        #     self.output2 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # scores
-        #     self.output2.name = output_name[2]
-        #     self.output3 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # image dims
-        #     self.output3.name = output_name[3]
-
-        #     self.channel.request.outputs.extend([self.output0,
-        #                                          self.output1,
-        #                                          self.output2,
-        #                                          self.output3])
-        # else:
-        #     self.output = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-        #     self.output.name = output_name[0]
-        #     self.channel.request.outputs.extend([self.output])
-        # self.channel.output.name = output_name[0]
-        # self.channel.request.outputs.extend([self.channel.output])
 
     def resize(self, image):
         # cv_image = cv2.resize(cv_image, (self.channel.input.shape[2], self.channel.input.shape[1]))
@@ -525,17 +505,15 @@ class EvaluateInference(BaseInference):
         schan = seerep_channel.SEEREPChannel(
             project_name=self.args.seerep_project,
             socket=self.args.channel_seerep,
+            modality=self.modality,
             format=self.format,  # TODO make it dynamic with Source_Kitti
             visualize=self.viz,
         )
-        # socket='localhost:9090')
 
-        # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
-        sample_type = "point_clouds"
-        if sample_type == "image":
+        if self.modality == "image":
             data = schan.run_query_images(self.args.semantics)
             self.process_images(data, schan)
-        elif sample_type == "point_clouds":
+        elif self.modality == "point_clouds":
             data = schan.run_query_pointclouds(self.args.semantics)
             self.process_pc(data, schan)
 

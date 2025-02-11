@@ -71,12 +71,6 @@ class SEEREPChannel():
         self.modality = modality
         self.register_channel()
         self.ann_dict = self.annotation_dict(format=format)
-        # if ros_test:
-        #     rospy.init_node('ros_infer')
-        #     self.ros_message = PointCloud2()
-        #     self.publisher = rospy.Publisher('/pointcloud2/test_pc', PointCloud2, queue_size=1)
-
-        #self._grpc_metadata() #
 
     def make_channel (self, secure=False):
         # server with certs
@@ -537,8 +531,7 @@ class SEEREPChannel():
         projectuuidString = self._builder.CreateString(self._projectid)
         Query.StartProjectuuidVector(self._builder, 1)
         self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-        projectUuids = [projectuuidString]
+        projectUuids = [self._projectid]
         queryMsg = util_fb.createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
@@ -571,18 +564,6 @@ class SEEREPChannel():
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
             height = response.Width()
             width = response.Height()
-            # TODO change the decoding to numpy for cleaner implementation
-            # point_fields = self.unpack_point_fields(response)
-            # dtypes = np.dtype(
-            #     {
-            #         "names": point_fields["name"],
-            #         "formats": [Point_Field_Datatype[datatype] for datatype in point_fields['datatype']],
-            #         "offsets": point_fields["offset"],
-            #         "itemsize": response.PointStep(),
-            #     }
-            # )
-            # decoded_payload = np.frombuffer(response.DataAsNumpy(), dtype=dtypes)
-            # reshaped_data = np.reshape(decoded_payload, (response.Height(), response.Width()))
 
             sample['uuid'] = self._msguuid
             raw_data = response.DataAsNumpy()
