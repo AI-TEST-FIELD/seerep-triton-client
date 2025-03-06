@@ -1,4 +1,3 @@
-
 from communicator.channel.base_channel import BaseChannel
 from logger import Client_logger, TqdmToLogger
 import logging
@@ -14,18 +13,38 @@ import cv2
 import numpy as np
 import struct
 import uuid
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from copy import copy
 from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
 
-from seerep.fb import Boundingbox, Empty, Header, Image, Point, ProjectInfos, Query, TimeInterval, Timestamp
-from seerep.fb import PointCloud2 as pc2
-from seerep.fb import image_service_grpc_fb as imageService
-from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
-from seerep.fb import meta_operations_grpc_fb as metaOperations
-from seerep.util import fb_helper as util_fb
+from seerep.fb import (
+    Boundingbox, 
+    Empty, 
+    Header, 
+    Image, 
+    Point, 
+    ProjectInfos, 
+    Query, 
+    TimeInterval, 
+    Timestamp
+)
+ 
+from seerep.fb import (
+    PointCloud2 as pc2,
+    image_service_grpc_fb as imageService,
+    point_cloud_service_grpc_fb as pointCloudService,
+    meta_operations_grpc_fb as metaOperations,
+    tf_service_grpc_fb as tfService,
+    TransformStamped
+)
+from seerep.util.fb_helper import (
+    createHeader,
+    createTimeStamp,
+    createTransformStampedQuery,
+    createQuery
+    )
 from visual_utils import open3d_vis_utils as visualizer
 
 logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
@@ -49,8 +68,8 @@ class SEEREPChannel():
     """
     def __init__(self, 
                  project_name='testproject', 
-                 socket='agrigaia-ur.ni.dfki:9090', 
-                 modality='images',
+                 endpoint='agrigaia-ur.ni.dfki:9090', 
+                 modality='image',
                  format='coco',
                  visualize=False):
         
@@ -60,46 +79,38 @@ class SEEREPChannel():
         self._builder = None
         self._projectid = None
         self._msguuid = None
-        self.socket = socket
+        self.endpoint = endpoint
         self.projname = project_name
         self.normalized_coors = False
         self.visualize = visualize
 
         # register and initialise the stub
-        self.channel = self.make_channel(secure=False)
+        self.channel = self.make_channel()
         self.vis = visualize
         self.modality = modality
         self.register_channel()
         self.ann_dict = self.annotation_dict(format=format)
 
-    def make_channel (self, secure=False):
-        # server with certs
-        if secure:
-            __location__ = os.path.realpath(
-                os.path.join(os.getcwd(), os.path.dirname(__file__)))
-            with open(os.path.join(__location__, 'tls.pem'), 'rb') as f:
-                root_cert = f.read()
-            creds = grpc.ssl_channel_credentials(root_cert)
-
-            channel = grpc.secure_channel(self.socket, creds) # use with non-local deployment
-
-        else:
-            channel = grpc.insecure_channel(self.socket) # use with local deployment
-
+    def make_channel(self):
+        '''
+        Make a channel to the SEEREP server
+        at the given socket address
+        Returns:
+            channel: grpc channel to the SEEREP server
+        '''
+        channel = grpc.insecure_channel(self.endpoint) # use with local deployment
         return channel
     
     def register_channel(self):
         """
-         register grpc triton channel
-         socket: String, Port and IP address of seerep server
-         seerep.robot.10.249.3.13.nip.io:32141
+         register all the gRPC stubs for data modalities, meta operations and tf service
+         and fetch the project id from the SEEREP server
         """
-        # self._grpc_stub  = imageService.ImageServiceStub(self.channel)
-        if self.modality == 'images':
+        if self.modality == 'image':
             self._grpc_stub  = imageService.ImageServiceStub(self.channel)
-        elif self.modality == 'pointclouds':
+        elif self.modality == 'pointcloud':
             self._grpc_stub  = pointCloudService.PointCloudServiceStub(self.channel)
-        # self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
+        self._tf_stub = tfService.TfServiceStub(self.channel)
         self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel) 
         self._builder = self.init_builder()
         self._msgUuid = None
@@ -118,6 +129,15 @@ class SEEREPChannel():
         projectid = self._projectid
 
         return (grpc_stub, grpc_stubmeta, builder, projectid)
+    
+    def tf_channel(self):
+        """
+         Establish a channel for querying TFs
+        """
+        tf_stub  = tfService.TfServiceStub(self.channel)
+        builder = self.init_builder()
+
+        return (tf_stub, builder)
 
     def fetch_channel(self):
         """
@@ -204,6 +224,7 @@ class SEEREPChannel():
         curr_proj = None
         duplicate = False
         logger.info("List of available projects on the SEEREP Server")
+        # TODO here we should already receive a list of project UUIDs directly from the mastermind MM. This is redundant atm. 
         for i in range(response.ProjectsLength()):
             if log==True:
                 try:
@@ -216,16 +237,8 @@ class SEEREPChannel():
                     else:
                         logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
                         projects[tmp] = response.Projects(i).Uuid().decode("utf-8")                
-                    # if response.Projects(i).Name().decode("utf-8") == projname:
-                    #     curr_proj = tmp
-                    #     projectuuid = response.Projects(i).Uuid().decode("utf-8")
                 except Exception as e:
                     logger.error(e)
-            # else:
-            #     try:
-            #         projectuuid = response.Projects(i).Uuid().decode("utf-8")
-            #     except Exception as e:
-            #         logger.error(e)
         if projname in projects:
             curr_proj = projname
             projectuuid = projects[curr_proj]
@@ -235,186 +248,22 @@ class SEEREPChannel():
             logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
             sys.exit(0)
 
-    def string_to_fbmsg (self, projectuuid):
-        projectuuidString = self._builder.CreateString(projectuuid)
-        '''
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-
-        return projectuuidMsg
-        '''
-        return projectuuidString
-
     def init_builder(self):
-        builder = flatbuffers.Builder(1024)
+        '''
+        Initialize a flatbuffers builder
+        Returns:
+            fb_builder: flatbuffers builder
+        '''
+        fb_builder = flatbuffers.Builder(1024)
         
-        return builder
-
-    def gen_boundingbox(self, start_coord, end_coord):
-        '''
-        Add a bounding box to the query builder
-        Args:
-            start_coord : An interable of the X, Y and Z start co ordinates of the point, in this order.
-            end_coord : An interable of the X, Y and Z end co ordinates of the point, in this order.
-        '''
-        
-        Point.Start(self._builder)
-        Point.AddX(self._builder, start_coord[0])
-        Point.AddY(self._builder, start_coord[1])
-        #Point.AddZ(self._builder, start_coord[2])
-        pointMin = Point.End(self._builder)
-
-        Point.Start(self._builder)
-        Point.AddX(self._builder, end_coord[0])
-        Point.AddY(self._builder, end_coord[1])
-        #Point.AddZ(self._builder, end_coord[2])
-        pointMax = Point.End(self._builder)
-
-        frameId = self._builder.CreateString("map")
-        Header.Start(self._builder)
-        Header.AddFrameId(self._builder, frameId)
-        header = Header.End(self._builder)
-
-        Boundingbox.Start(self._builder)
-        Boundingbox.AddPointMin(self._builder, pointMin)
-        Boundingbox.AddPointMax(self._builder, pointMax)
-        #Boundingbox.AddHeader(self._builder, header)
-        boundingbox = Boundingbox.End(self._builder)
-
-        #Query.AddBoundingbox(self._builder, boundingbox)
-        return boundingbox
-
-    def gen_boundingbox2dlabeledstamped (self, boundingBoxes):
-
-        projuuid_str = self.string_to_fbmsg(self._projectid)
-        msguuid_str = self.string_to_fbmsg(self._msguuid)
-
-        # build header
-        Header.Start(self._builder)
-        Header.AddUuidProject(self._builder, projuuid_str)
-        Header.AddUuidMsgs(self._builder, msguuid_str)
-        header = Header.End(self._builder)
-
-        # a labels_bb array which will hold all the bbs
-        label_bbs = []
-
-        # create bounding box(es)
-        for bb in boundingBoxes:
-            x = self.gen_boundingbox(bb[0], bb[1])
-            label_bbs.append(x)
-
-        BoundingBoxes2DLabeledStamped.StartLabelsBbVector(self._builder, len(label_bbs))
-        for bb in reversed(label_bbs):
-            self._builder.PrependUOffsetTRelative(bb)
-        self._builder.EndVector()
-
-        # Start a new bounding box 2d labeled stamped
-        BoundingBoxes2DLabeledStamped.Start(self._builder)
-
-        BoundingBoxes2DLabeledStamped.AddHeader(self._builder, header)
-
-        for label_bb in label_bbs:
-            BoundingBoxes2DLabeledStamped.AddLabelsBb(self._builder, label_bb)
-
-        return BoundingBoxes2DLabeledStamped.End(self._builder)
-
-    def gen_timestamp(self, starttime, endtime):
-        '''
-        Add a time range to the query builder
-        Args:
-            starttime : Start time as an int
-            endtime : End time as an int
-        '''
-
-        Timestamp.Start(self._builder)
-        Timestamp.AddSeconds(self._builder, starttime)
-        Timestamp.AddNanos(self._builder, 0)
-        timeMin = Timestamp.End(self._builder)
-
-        Timestamp.Start(self._builder)
-        Timestamp.AddSeconds(self._builder, endtime)
-        Timestamp.AddNanos(self._builder, 0)
-        timeMax = Timestamp.End(self._builder)
-
-        TimeInterval.Start(self._builder)
-        TimeInterval.AddTimeMin(self._builder, timeMin)
-        TimeInterval.AddTimeMax(self._builder, timeMax)
-        timeInterval = TimeInterval.End(self._builder)
-
-        #Query.AddTimeinterval(self._builder, timeInterval)
-        return timeInterval
-
-    def gen_label(self, label):
-        label = builder.CreateString("1")
-        Query.StartLabelVector(builder, 1)
-        builder.PrependUOffsetTRelative(label)
-        labelMsg = builder.EndVector()
-
-        #Query.AddLabel(builder, labelMsg)
-        return labelMsg
-
-    def run_query(self, **kwargs):
-        projectuuidString = self._builder.CreateString(self._projectid)
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-
-        Query.Start(self._builder)
-        Query.AddProjectuuid(self._builder, projectuuidMsg)
-        # Query.AddWithoutdata
-        for key, value in kwargs.items():
-            if key == "bb": Query.AddBoundingbox(self._builder, value)
-            if key == "ti": Query.AddTimeinterval(self._builder, value)
-
-        queryMsg = Query.End(self._builder)
-
-        self._builder.Finish(queryMsg)
-        buf = self._builder.Output()
-        
-        data = []
-        sample = {}
-
-        for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
-            print('[INFO] Receiving images . . .')
-            response = Image.Image.GetRootAs(responseBuf)
-
-            # this should not be inside the loop
-            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
-            sample['uuid'] = self._msguuid
-            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), 3))
-
-            # Uncomment to visualize images
-            # import matplotlib.pyplot as plt
-            # plt.imshow(np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), 3)))
-            # plt.show()
-            # TODO why are the bounding boxes empty?????
-            nbbs = response.LabelsBbLength()
-            sample['boxes'] = nbbs
-            for category in range(response.LabelsBbLength()):
-                logger.info("Category name: {}".format(response.LabelsBb(category).Category().decode("utf-8")))
-                for x in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
-                    logger.info(f"uuidmsg: {response.Header().UuidMsgs().decode('utf-8')}")
-                    logger.info("first label: " + response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Label().decode("utf-8") 
-                        + " ; confidence: " 
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).LabelWithInstance().Label().Confidence())
-                        )
-                    logger.info(
-                        "bounding box number (Xcenter,Ycenter,Xextent,Yextent):"
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().CenterPoint().X())
-                        + " "
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().CenterPoint().Y())
-                        + " "
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().SpatialExtent().X())
-                        + " "
-                        + str(response.LabelsBb(0).BoundingBox2dLabeled(x).BoundingBox().SpatialExtent().Y())
-                        + "\n"
-                    )
-            data.append(sample)
-            sample={}
-        return data
+        return fb_builder
     
     def annotation_dict(self, format='coco'):
+        '''
+        Initialize a dictionary of class names and their corresponding indices
+        Returns:
+            anns_dict: dictionary of class names and their corresponding indices
+        '''
         anns_dict = {}
         class_names= []
         if format == 'coco':
@@ -433,106 +282,17 @@ class SEEREPChannel():
 
         return anns_dict
 
-    def unpack_point_fields(self, point_cloud: pc2.PointCloud2) -> dict:
-        """Extract the point fields from a Flatbuffer pcl message"""
-        return {
-            "name": [point_cloud.Fields(i).Name().decode("utf-8") for i in range(point_cloud.FieldsLength())],
-            "datatype": [point_cloud.Fields(i).Datatype() for i in range(point_cloud.FieldsLength())],
-            "offset": [point_cloud.Fields(i).Offset() for i in range(point_cloud.FieldsLength())],
-            "count": [point_cloud.Fields(i).Count() for i in range(point_cloud.FieldsLength())],
-        }
-
     def run_query_images(self, *args):
-        projectuuidString = self._builder.CreateString(self._projectid)
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-        projectUuids = [projectuuidString]
-        # categories = ['AutoGeneratedGroundTruth']
-        # labels = [[util_fb.createLabelWithConfidence(self._builder, "person"), 
-        #         #    util_fb.createLabelWithConfidence(self._builder, "weather_general_sun"),
-        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_cloudy"),
-        #         #    util_fb.createLabelWithConfidence(self._builder, "weatherGeneral_rain"),
-        #          ]]
-        # labels = [[util_fb.createLabelWithConfidence(self._builder, semantic) for semantic in args[0]]]
-        # labelCategory = util_fb.createLabelWithCategory(self._builder, categories, labels)
-        queryMsg = util_fb.createQuery(
-            self._builder,
-            # boundingBox=boundingboxStamped,
-            # timeInterval=timeInterval,
-            # labels=labelCategory,
-            # mustHaveAllLabels=False,
-            projectUuids=projectUuids,
-            # instanceUuids=instanceUuids,
-            # dataUuids=dataUuids,
-            withoutData=False,
-            # sortByTime=True,  # from version 0.2.5 onwards
-        )
-        self._builder.Finish(queryMsg)
-        buf = self._builder.Output()
-        data = []
-        sample = {}
-        category = 1 # ground_truth
-        for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
-            logger.info('Receiving messages from the SEEREP server')
-            response = Image.Image.GetRootAs(responseBuf)
-            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
-            sample['uuid'] = self._msguuid
-            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1)) # When more than 3 channels
-            if sample['image'].shape[2] == 4:
-                tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGBA2BGRA)
-            elif sample['image'].shape[2] == 3:
-                tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
-            sample['boxes'] = []
-            # for category in range(response.LabelsBbLength()):
-            for j in range(response.LabelsBb(0).BoundingBox2dLabeledLength()):
-                label = response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Label().decode("utf-8")
-                confidence = np.float16(response.LabelsBb(0).BoundingBox2dLabeled(j).LabelWithInstance().Label().Confidence())
-                x, y = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().CenterPoint().Y()
-                w, h = response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().X(), response.LabelsBb(0).BoundingBox2dLabeled(j).BoundingBox().SpatialExtent().Y()
-                x_tl, y_tl = x - (w/2), y - (h/2)
-                if x<=1 and y<=1:
-                    self.normalized_coors = True 
-                    sample['normalized'] = True
-                else:
-                    sample['normalized'] = False
-                    self.normalized_coors = False 
-                if sample['normalized'] == False:
-                    sample['boxes'].append([x_tl, y_tl, w, h, self.ann_dict[label], confidence])
-                else:
-                    scale_x, scale_y = sample['image'].shape[1], sample['image'].shape[0]
-                    sample['boxes'].append([x_tl * scale_x, y_tl * scale_y, w * scale_x, h * scale_y, self.ann_dict[label], confidence])
-                # For DEBUG
-            #     if self.vis:
-            #         cv2.rectangle(tmp, 
-            #                       (int(sample['boxes'][j][0]), int(sample['boxes'][j][1])), 
-            #                       (int(sample['boxes'][j][0]+sample['boxes'][j][2]), int(sample['boxes'][j][1]+sample['boxes'][j][3])), 
-            #                       (255, 0, 0), 2)
-            #         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-            #         cv2.rectangle(tmp, 
-            #                       (int(sample['boxes'][j][0]), (int(sample['boxes'][j][1]) - 25)), 
-            #                       (int(sample['boxes'][j][0] + tw), int(sample['boxes'][j][1])), 
-            #                       (255, 0, 0), -1)
-            #         cv2.putText(tmp, label, (int(sample['boxes'][j][0]), int(sample['boxes'][j][1]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-            # if self.vis:
-            #     winname = 'SEEREP source image'
-            #     cv2.namedWindow(winname)
-            #     cv2.imshow(winname, tmp)
-            #     cv2.moveWindow(winname, 3000,200)
-            #     cv2.waitKey(0)
-            #     cv2.destroyWindow(winname)    
-            #     tmp = None
-            data.append(sample)
-            sample={}
-        logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
-        return data
+        pass
     
-    def run_query_pointclouds(self, *args):
-        projectuuidString = self._builder.CreateString(self._projectid)
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
+    def run_query_pointclouds(self) -> list[dict]:
+        """
+        Query the pointclouds from the SEEREP server
+        Returns:
+            data: list of dictionaries containing pointcloud data
+        """
         projectUuids = [self._projectid]
-        queryMsg = util_fb.createQuery(
+        queryMsg = createQuery(
             self._builder,
             # boundingBox=boundingboxStamped,
             # timeInterval=timeInterval,
@@ -551,21 +311,22 @@ class SEEREPChannel():
         # Collect the UUIDs and data from each sample sent by SEEREP project. 
         sample = {}
         # TODO the num_samples should be replaced by the total number of samples inside the seerep project
-        num_samples = 100
+        num_samples = 10
         for responseBuf, curr_sample in tqdm(zip(self._grpc_stub.GetPointCloud2(bytes(buf)),
                                     range(num_samples)),
                                     total=num_samples,
                                     colour='GREEN',
-                                    # file=tqdm_out,
                                     desc='Receiving pointclouds from the SEEREP server',
                                     unit=" samples"):
-            # logger.info('Receiving pointclouds from the SEEREP server')
             response = pc2.PointCloud2.GetRootAs(responseBuf)
             self._msguuid = response.Header().UuidMsgs().decode("utf-8")
+            timestamp = response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()
             height = response.Width()
             width = response.Height()
 
             sample['uuid'] = self._msguuid
+            sample['sensor_name'] = response.Header().FrameId().decode("utf-8")
+            sample['timestamp'] = timestamp
             raw_data = response.DataAsNumpy()
             fields = {}
             dtype = None
@@ -599,25 +360,20 @@ class SEEREPChannel():
                 fields[field]['data'] = (np.array(strs, dtype=np.object_))
                 strs = []
             sample['point_cloud'] = copy(fields) 
-            if False:
-                from math import sin, cos
-                angle=15
+            if 'reflectivity' in fields:
+                sample['lidar_feature'] = 'reflectivity'
+            else:
+                sample['lidar_feature'] = 'intensity'
+            if self.visualize:
                 pc = np.zeros((height*width, 3), dtype=np.float64)
                 pc[:, 0] = fields['x']['data'][:, 0]
                 pc[:, 1] = fields['y']['data'][:, 0]
                 pc[:, 2] = fields['z']['data'][:, 0]
-                ry = R.from_euler('y', 30, degrees=True).as_matrix()
-                rz = R.from_euler('z', 90, degrees=True).as_matrix()
-                rotation_matrix = np.array([[cos(angle), 0, sin(angle)], 
-                                [0, 1, 0], 
-                                [-sin(angle), 0, cos(angle)]])
-                # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509], 
-                #                             [0.01212522,  0.99957356,  0.02656451], 
-                #                             [-0.56296864, -0.01513165, 0.82633973]])
-                pc = np.matmul(ry, pc.T).T
-                pc = np.matmul(rz, pc.T).T
+                # ry = R.from_euler('y', 30, degrees=True).as_matrix()
+                # rz = R.from_euler('z', 90, degrees=True).as_matrix()
+                # pc = np.matmul(ry, pc.T).T
+                # pc = np.matmul(rz, pc.T).T
                 pc += [0., 0., -1.026558971]
-                # pc = r.apply(pc)
                 visualizer.draw_scenes(pc)
             # Store the sample into data collection
             data.append(sample)
@@ -627,65 +383,52 @@ class SEEREPChannel():
             if curr_sample==0:
                 break
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
+        data = self.run_query_tf(data)
         return data
     
-    def sendboundingbox(self, sample, bbs, labels, confidences, model_name):
-        header = util_fb.createHeader(
-            self._builder,
-            projectUuid = self._projectid,
-            msgUuid= sample['uuid']
-        )
-
-        boundingBoxes = util_fb.createBoundingBoxes2d(
-            self._builder,
-            [util_fb.createPoint2d(self._builder, bb[0][0], bb[0][1]) for bb in bbs],
-            [util_fb.createPoint2d(self._builder, bb[1][0], bb[1][1]) for bb in bbs],
-        )
-        if model_name == "ground_truth":
-            labelWithInstances = util_fb.createLabelsWithInstance(
-            self._builder,
-            [label for label in labels],
-            [1.0 for conf in confidences],
-            [str(uuid.uuid4()) for _ in range(len(bbs))],
+    def run_query_tf(self, data: list[dict]) -> list[dict]:
+        """
+        Query the TF for each pointcloud
+        Args:
+            data: list of dictionaries containing pointcloud data
+        Returns:
+            data: list of dictionaries containing pointcloud data with TFs
+        """
+        tf_stub, builder = self.tf_channel()
+        for sample, index in tqdm(zip(data, range(len(data))),
+                            total=len(data),
+                            colour='BLUE',
+                            desc='Query TF for each pointcloud',
+                            unit=" samples"):
+            
+            timestamp = createTimeStamp(builder, sample['timestamp'][0], sample['timestamp'][1])    # [0] is seconds, [1] is nanoseconds
+            header = createHeader(
+                builder=builder,
+                timeStamp=timestamp,
+                frame=sample['sensor_name'],
+                projectUuid=self._projectid
             )
-        else:   
-            labelWithInstances = util_fb.createLabelsWithInstance(
-            self._builder,
-            [label for label in labels],
-            [conf for conf in confidences],
-            [str(uuid.uuid4()) for _ in range(len(bbs))],
+            tf_query = createTransformStampedQuery(
+                builder=builder,
+                header=header,
+                childFrameId='base_link',
             )
-        labelsBb = util_fb.createBoundingBoxes2dLabeled(self._builder, labelWithInstances, boundingBoxes)
-
-        boundingBox2DLabeledWithCategory = util_fb.createBoundingBox2DLabeledWithCategory(
-            self._builder, self._builder.CreateString(model_name), labelsBb
-        )
-
-        labelsBbVector = util_fb.createBoundingBox2dLabeledStamped(self._builder, header, [boundingBox2DLabeledWithCategory])
-        self._builder.Finish(labelsBbVector)
-        buf = self._builder.Output()
-
-        msg = [bytes(buf)]
-
-        send_channel, _, _, _ = self.secondary_channel()
-        try:
-            ret = send_channel.AddBoundingBoxes2dLabeled( iter(msg) )
-        except Exception as e:
-            logger.error(e)   
-
-
-    '''
-    def sendboundingbox(self, bb):
-        send_channel, _, _, _ = self.secondary_channel()
-
-        self._builder.Finish(bb)
-        buf = self._builder.Output()
-        bufBytes = [ bytes(buf) ]
-
-        ret = send_channel.AddBoundingBoxes2dLabeled( iter(bufBytes) )
-
-        print("[bb service call]" + str(ret.decode()))
-    '''
+            builder.Finish(tf_query)
+            tf_buf: bytearray = tf_stub.GetTransformStamped(bytes(builder.Output()))
+            try:
+                tf = TransformStamped.TransformStamped.GetRootAs(tf_buf)
+                x = tf.Transform().Translation().X()
+                y = tf.Transform().Translation().Y()
+                z = tf.Transform().Translation().Z()
+                qx = tf.Transform().Rotation().X()
+                qy = tf.Transform().Rotation().Y()
+                qz = tf.Transform().Rotation().Z()
+                qw = tf.Transform().Rotation().W()
+                data[index]['tf'] = [x, y, z, qx, qy, qz, qw]
+            except Exception as e:
+                logger.error(f"Error querying TF for pointcloud {sample['uuid']}: {e}")
+                data[index]['tf'] = None
+        return data
 
 def main():
     schan = SEEREPChannel()
