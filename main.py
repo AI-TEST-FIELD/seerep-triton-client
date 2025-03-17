@@ -1,10 +1,8 @@
 #!/usr/bin/env python
-
 import argparse
-import yaml
 
 from communicator import EvaluateInference
-from communicator.channel import grpc_channel, seerep_channel
+from communicator.endpoint.triton_endpoint import TritonEndpoint
 from clients import Yolov5client, FCOS_client, Detrex_client
 
 clients = {
@@ -104,8 +102,8 @@ if __name__ == '__main__':
     client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
 
     #define channel
-    channel = grpc_channel.GRPCChannel(FLAGS)
+    triton_grpc_stub = TritonEndpoint(FLAGS)
 
     #define inference
-    evaluation = EvaluateInference(args=FLAGS, channel=channel, client=client, format=format)
+    evaluation = EvaluateInference(args=FLAGS, triton_stub=triton_grpc_stub, client=client, format=format)
     evaluation.start_inference(model_name=FLAGS.model_name, modality=FLAGS.mode)

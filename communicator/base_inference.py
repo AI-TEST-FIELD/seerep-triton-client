@@ -1,7 +1,7 @@
 import grpc
 from abc import ABC, abstractmethod
 from tritonclient.grpc import service_pb2, service_pb2_grpc
-from communicator.channel import base_channel
+from communicator.endpoint import base_channel
 
 class BaseInference(ABC):
 

@@ -1,7 +1,4 @@
-
-from communicator.channel.base_channel import BaseChannel
 from logger import Client_logger, TqdmToLogger
-#from base_channel import BaseChannel
 from tritonclient.grpc import service_pb2, service_pb2_grpc
 import tritonclient.grpc.model_config_pb2 as mc
 
@@ -57,7 +54,6 @@ tqdm_out = TqdmToLogger(logger,level=logging.INFO)
 class APIError(Exception):
     pass
 
-
 class DatumaroError(Exception):
     pass
 
@@ -73,25 +69,22 @@ Point_Field_Datatype =  {
     8: np.dtype(np.float64),
 }
 
-class SEEREPChannel():
+class SeerepEndpoint:
     """
-    A SEEREPChannel is establishes a connection between the triton client and SEEREP.
+    A SeerepEndpoint establishes a connection between the triton client and SEEREP.
     """
     def __init__(self,
-                 project_name='testproject',
-                 socket='agrigaia-ur.ni.dfki:9090',
-                 modality='images',
-                 format='coco',
+                 endpoint_url='agrigaia-ur.ni.dfki:9090',
+                 modality='image',
                  visualize=False):
-
         self._meta_data = {}
         self._grpc_stub = None
         self._grpc_stubmeta = None
         self._builder = None
         self._projectid = None
         self._msguuid = None
-        self.socket = socket
-        self.projname = project_name
+        self.endpoint_url = endpoint_url
+        # self.projname = project_name
         self.normalized_coors = False
         self.visualize = visualize
 
@@ -100,12 +93,12 @@ class SEEREPChannel():
         self.vis = visualize
         self.modality = modality
         self.register_channel()
-        self.ann_dict = self.annotation_dict(format=format)
+        # self.ann_dict = self.annotation_dict(format=format)
         if self.visualize:
             self.source_window = 'SEEREP source image'
             cv2.namedWindow(self.source_window)
 
-    def make_channel (self, secure=False):
+    def make_channel(self, secure=False):
         # server with certs
         if secure:
             __location__ = os.path.realpath(
@@ -114,28 +107,27 @@ class SEEREPChannel():
                 root_cert = f.read()
             creds = grpc.ssl_channel_credentials(root_cert)
 
-            channel = grpc.secure_channel(self.socket, creds) # use with non-local deployment
+            channel = grpc.secure_channel(self.endpoint_url, creds) # use with non-local deployment
 
         else:
-            channel = grpc.insecure_channel(self.socket) # use with local deployment
+            channel = grpc.insecure_channel(self.endpoint_url) # use with local deployment
 
         return channel
 
     def register_channel(self):
         """
          register grpc triton channel
-         socket: String, Port and IP address of seerep server
-         seerep.robot.10.249.3.13.nip.io:32141
+         endpoint_url: String, Port and IP address of seerep server
+         e.g. agrigaia-ur.ni.dfki:9090
         """
         if self.modality == 'images':
             self._grpc_stub  = imageService.ImageServiceStub(self.channel)
         elif self.modality == 'pointclouds':
             self._grpc_stub  = pointCloudService.PointCloudServiceStub(self.channel)
-        # self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
         self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
         self._builder = self.init_builder()
         self._msgUuid = None
-        self._projectid = self.retrieve_project(self.projname, log=True)
+        # self._projectid = self.retrieve_project(self.projname, log=True)
 
     def secondary_channel(self):
         """
@@ -223,8 +215,10 @@ class SEEREPChannel():
             strs.append(sb)
         return (np.array(strs, dtype=np.object_))
 
-    def retrieve_project(self, projname, log=False):
+    def get_project_uuid(self, project_name: list[str], log=False):
         '''
+        Returns UUID of the project given by project_name.
+        #TODO return a list of projects or single project uuids? 
         '''
         Empty.Start(self._builder)
         emptyMsg = Empty.End(self._builder)
@@ -237,46 +231,53 @@ class SEEREPChannel():
         duplicate = False
         logger.info("List of available projects on the SEEREP Server")
         for i in range(response.ProjectsLength()):
-            if log==True:
-                try:
-                    tmp = response.Projects(i).Name().decode("utf-8")
-                    if tmp in projects:
-                        logger.info(tmp+'_2' + " " + response.Projects(i).Uuid().decode("utf-8"))
-                        logger.warning('Found multiple projects with same project name but with different UUIDs! Please check SEEREP Server!')
-                        projects[tmp+'_2'] = response.Projects(i).Uuid().decode("utf-8")
-                        duplicate = True
-                    else:
-                        logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
-                        projects[tmp] = response.Projects(i).Uuid().decode("utf-8")
-                    # if response.Projects(i).Name().decode("utf-8") == projname:
-                    #     curr_proj = tmp
-                    #     projectuuid = response.Projects(i).Uuid().decode("utf-8")
-                except Exception as e:
-                    logger.error(e)
-            # else:
-            #     try:
-            #         projectuuid = response.Projects(i).Uuid().decode("utf-8")
-            #     except Exception as e:
-            #         logger.error(e)
-        if projname in projects:
-            curr_proj = projname
+            try:
+                tmp = response.Projects(i).Name().decode("utf-8")
+                if tmp in projects:
+                    logger.info(tmp+'_2' + " " + response.Projects(i).Uuid().decode("utf-8"))
+                    logger.warning('Found multiple projects with same project name but with different UUIDs! Please check SEEREP Server!')
+                    projects[tmp+'_2'] = response.Projects(i).Uuid().decode("utf-8")
+                    duplicate = True
+                else:
+                    logger.info(tmp + " " + response.Projects(i).Uuid().decode("utf-8"))
+                    projects[tmp] = response.Projects(i).Uuid().decode("utf-8")
+            except Exception as e:
+                logger.error(e)
+        if project_name in projects:
+            curr_proj = project_name
             projectuuid = projects[curr_proj]
             logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
             return projectuuid
         else:
             logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
             sys.exit(0)
-
-    def string_to_fbmsg (self, projectuuid):
-        projectuuidString = self._builder.CreateString(projectuuid)
-        '''
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-
-        return projectuuidMsg
-        '''
-        return projectuuidString
+            
+    def fetch_data_by_sample(self, data_uuids: list[str], log=False):
+        queryMsg = util_fb.createQuery(
+            self._builder,
+            # projectUuids=projectUuids,
+            dataUuids=data_uuids,
+            # withoutData=False,
+            sortByTime=True,  # from version 0.2.5 onwards
+        )
+        self._builder.Finish(queryMsg)
+        buf = self._builder.Output()
+        data = []
+        for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
+            sample = {}
+            logger.info('Receiving messages from the SEEREP server')
+            response = Image.Image.GetRootAs(responseBuf)
+            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
+            sample['uuid'] = self._msguuid
+            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
+            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
+            sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
+            data.append(sample)
+            
+        return data
+    
+    def fetch_data_by_uuid(self, project_uuids: list[str], log=False):
+        pass
 
     def init_builder(self):
         builder = flatbuffers.Builder(1024)

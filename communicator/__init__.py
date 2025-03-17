@@ -1,2 +1,3 @@
 from .evaluate_inference import EvaluateInference
-from .channel import base_channel
+from .endpoint import seerep_endpoint, triton_endpoint
+# from .base_inference import BaseInference

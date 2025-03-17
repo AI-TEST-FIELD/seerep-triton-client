@@ -1,30 +1,26 @@
-from communicator.channel.base_channel import BaseChannel
-
 import grpc
 from tritonclient.grpc import service_pb2, service_pb2_grpc
 import tritonclient.grpc.model_config_pb2 as mc
 
 
-class GRPCChannel(BaseChannel):
+class TritonEndpoint:
     """
-    A GRPCChannel is responsible for establishing connection between client and server using gRPC.
+    A TritonEndpoint is responsible for establishing connection between client and triton server using gRPC only.
     """
 
     def __init__(self,FLAGS):
-        super().__init__(FLAGS)
         self._meta_data = {}
         self._grpc_stub = None
-        self.args = FLAGS
+        self.FLAGS = FLAGS
 
-        self.register_channel() # register and initialise the stub
-        self._grpc_metadata() #
+        self.register_grpc_channel() # register and initialise the stub
+        self._fetch_model_metadata() #
 
-
-    def register_channel(self):
+    def register_grpc_channel(self):
         """
-         register grpc triton channel
+        Register the connection via the gRPC endpoint of the Triton server
         """
-        grpc_channel =  grpc.insecure_channel(self.args.channel_triton ,options=[
+        grpc_channel =  grpc.insecure_channel(self.FLAGS.channel_triton ,options=[
                                    ('grpc.max_send_message_length', self.FLAGS.batch_size*17671546),
                                    ('grpc.max_receive_message_length', self.FLAGS.batch_size*17671546),
                                     ])
@@ -36,7 +32,7 @@ class GRPCChannel(BaseChannel):
         """
         return self._grpc_stub
 
-    def _grpc_metadata(self):
+    def _fetch_model_metadata(self):
         """
         Initiate all meta data required for models
         """
@@ -50,8 +46,8 @@ class GRPCChannel(BaseChannel):
                                                                            version=self.FLAGS.model_version)
         self._meta_data["config_response"] = self._grpc_stub.ModelConfig(self._meta_data["config_request"])
 
-        # set
-        self._set_grpc_members()
+        # set essential grpc members
+        self._init_model_io()
 
     def get_metadata(self):
         """
@@ -60,7 +56,7 @@ class GRPCChannel(BaseChannel):
         """
         return self._meta_data
 
-    def _set_grpc_members(self):
+    def _init_model_io(self):
         """
         set essential grpc members
         """
@@ -76,9 +72,3 @@ class GRPCChannel(BaseChannel):
         @return: inference of grpc
         """
         return self._grpc_stub.ModelInfer(self.request)
-
-
-
-
-
-

@@ -6,10 +6,8 @@ import numpy as np
 import sys
 import logging
 from tqdm import tqdm
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
-import torchvision
-import torch
+# import torchvision
+# import torch
 # import open3d as o3d
 
 from tritonclient.grpc import service_pb2, service_pb2_grpc
@@ -19,10 +17,9 @@ import tritonclient.grpc.model_config_pb2 as mc
 #     pcd_o3d_to_numpy,
 #     pcd_ros_to_o3d,
 # )
-from .channel import grpc_channel
+from .endpoint import triton_endpoint
 from .base_inference import BaseInference
-from communicator.channel import seerep_channel
-from tools.seerep2coco import COCO_SEEREP
+from communicator.endpoint.seerep_endpoint import SeerepEndpoint
 from logger import Client_logger, TqdmToLogger
 from utils import cxcy2xyxy, xyxy2cxcy
 # from visual_utils import open3d_vis_utils as visualizer
@@ -32,9 +29,10 @@ tqdm_out = TqdmToLogger(logger, level=logging.INFO)
 # O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
 
 class EvaluateInference(BaseInference):
-
     """
-    A RosInference to support ROS input and provide input to channel for inference.
+    This class automatically fetches data from given SEEREP args.seerep_project
+    at args.channel_seerep and performs inference on the images using the Triton server
+    at args.channel_triton. It uses the gRPC channel.
     """
 
     def __init__(self, args, channel, client, format="coco"):
@@ -47,7 +45,6 @@ class EvaluateInference(BaseInference):
         super().__init__(channel, client)
 
         self.image = None
-        # self.class_names = self.load_class_names()
         self.args = args
         self._register_inference()  # register inference based on type of client
         self.client_postprocess = client.get_postprocess()  # get postprocess of client
@@ -59,7 +56,7 @@ class EvaluateInference(BaseInference):
         elif "CROP" in self.model_name:
             self.class_names = self.client_postprocess.load_class_names(dataset="CROP")
         else:
-            # TODO shutdown?
+            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
             self.class_names = None
         self.input_datatypes = {
             "UINT8": np.dtype(np.uint8),
@@ -122,27 +119,28 @@ class EvaluateInference(BaseInference):
         self.processed_counter = 0
         self.no_gt_counter = 0
 
-    def _register_inference(self):
+    def _register_grpc_endpoint(self):
         """
-        register inference
+        Register the GRPC endpoint for Triton server and fetch model metadata and configuration.
         """
         # for GRPC channel
-        if type(self.channel) == grpc_channel.GRPCChannel:
-            self._set_grpc_channel_members()
-        else:
-            pass
+        try:
+            if type(self.channel) == triton_endpoint.GRPCChannel:
+                self._configure_model_params()
+        except Exception as e:
+            logger.error(e)
+            sys.exit(1)
 
-    def _set_grpc_channel_members(self):
+    def _configure_model_params(self):
         """
-        Set properties for grpc channel, queried from the server.
+        Fetch and set the model metadata and configuration 
+        on the client side from the gRPC endpoint of Triton server.
+        Rest API is not supported. 
         """
         # collect meta data of model and configuration
         meta_data = self.channel.get_metadata()
 
         # parse the model requirements from client
-        # self.channel.input.name, output_name, c, h, w, format, self.channel.input.datatype = self.client.parse_model(
-        #     meta_data["metadata_response"], meta_data["config_response"].config)
-
         self.input_metadata, self.output_metadata = self.client.parse_model(
             meta_data["metadata_response"], meta_data["config_response"].config
         )
@@ -171,33 +169,7 @@ class EvaluateInference(BaseInference):
             # assign the gathered model outputs to the grpc channel
             self.channel.request.outputs.extend([self.outputs["output_{}".format(i)]])
 
-        # self.input_size = [h, w]
-        # if format == mc.ModelInput.FORMAT_NHWC:
-        #     self.channel.input.shape.extend([h, w, c])
-        # else:
-        #     self.channel.input.shape.extend([c, h, w])
-
-        # if len(output_name) > 1:  # Models with multiple outputs Boxes, Classes and scores
-        #     self.output0 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # boxes
-        #     self.output0.name = output_name[0]
-        #     self.output1 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # class_IDs
-        #     self.output1.name = output_name[1]
-        #     self.output2 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # scores
-        #     self.output2.name = output_name[2]
-        #     self.output3 = service_pb2.ModelInferRequest().InferRequestedOutputTensor() # image dims
-        #     self.output3.name = output_name[3]
-
-        #     self.channel.request.outputs.extend([self.output0,
-        #                                          self.output1,
-        #                                          self.output2,
-        #                                          self.output3])
-        # else:
-        #     self.output = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-        #     self.output.name = output_name[0]
-        #     self.channel.request.outputs.extend([self.output])
-        # self.channel.output.name = output_name[0]
-        # self.channel.request.outputs.extend([self.channel.output])
-
+    # TODO this should be moved to utils
     def resize(self, image):
         # cv_image = cv2.resize(cv_image, (self.channel.input.shape[2], self.channel.input.shape[1]))
         tmp = image.copy()
@@ -224,6 +196,9 @@ class EvaluateInference(BaseInference):
         return padded_image, cv_image.shape[0], cv_image.shape[1]
 
     def seerep_infer_image(self, image):
+        """
+        Perform inference on the images using Triton server
+        """
         # convert numpy array to cv2
         cv_image = image
         self.orig_size = cv_image.shape[0:2]
@@ -294,133 +269,7 @@ class EvaluateInference(BaseInference):
             else:
                 return self.prediction
 
-    # def preprocess_pc(self, ros_pcd, sensor_name: str, dataset_name: str) -> np.ndarray:
-    #     """
-    #     Processing Steps:
-    #         1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
-    #         2. Translate Point Cloud into the Dataset specific detector training dataset frame. Adjusts the Point Cloud to mimic the relative Lidar position from the detectors training dataset.
-    #         3. Normalize feature field [0, 1], by maximal possible feature value (reflectance/intensity = 255).
-
-
-    #     Args:
-    #         ros_pcd : Point cloud as Datastructure generated from ros message.
-    #         sensor_name : Sensor specific name tag associated with the point cloud.
-    #         dataset_name : The name of the dataset used for training of the object detector.
-
-    #     Return:
-    #         preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
-
-    #     """
-
-    #     # dictionary for sensor and dataset transformations
-    #     TRANSFORM_DICT = {
-    #         "base_transformation": {
-    #             "ouster": [
-    #                 [0.82638931, -0.02497454, 0.56254509, 0.191287],
-    #                 [0.01212522, 0.99957356, 0.02656451, -0.35169424],
-    #                 [-0.56296864, -0.01513165, 0.82633973, 1.90064396],
-    #                 [0.0, 0.0, 0.0, 1.0],
-    #             ],
-    #             "velodyne": [],
-    #             "robosense": [],
-    #         },
-    #         "dataset_translation": {
-    #             "kitti": [0.0, 0.0, -1.026558971],
-    #             "coco": [],
-    #         },
-    #     }
-
-    #     # lidar sensors which use the reflectivity field instead of intensity
-    #     REFLECTIVITY_SENSORS = ["ouster"]
-
-    #     MAX_FEATURE_VALUE = 255
-
-    #     # sensor and data specific params
-    #     sensor_to_robot_base_transform = o3d.core.Tensor(
-    #         TRANSFORM_DICT["base_transformation"][sensor_name], device=O3D_DEVICE
-    #     )
-    #     robot_base_to_train_dataset_translation = o3d.core.Tensor(
-    #         TRANSFORM_DICT["dataset_translation"][dataset_name], device=O3D_DEVICE
-    #     )
-    #     feature_field = (
-    #         "reflectivity" if sensor_name in REFLECTIVITY_SENSORS else "intensity"
-    #     )
-
-    #     # preprocessing steps
-    #     # raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=ros_pcd, feature_field=feature_field)
-    #     preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
-    #     preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
-    #         robot_base_to_train_dataset_translation
-    #     )
-    #     preprocessed_np_pcd = pcd_o3d_to_numpy(
-    #         o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
-    #     )
-    #     preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
-
-    #     self.pc = preprocessed_np_pcd
-    #     return preprocessed_np_pcd
-
-    def seerep_infer_pc(self, pointclouds: np.array):
-        self.preprocess_pc(
-            ros_pcd=pointclouds, sensor_name="velodyne", dataset_name="kitti"
-        )
-
-        self.pc = self.client_preprocess.filter_pc(self.pc)
-        num_voxels = self.pc["voxels"].shape[0]
-        self.channel.request.ClearField("raw_input_contents")  # Flush the previous sample content
-        for key, idx in zip(self.inputs, range(len(self.inputs))):
-            tmp_shape = self.inputs[key].shape
-            self.inputs[key].ClearField("shape")
-            tmp_shape[0] = num_voxels
-            self.channel.request.inputs[idx].ClearField("shape")
-            self.channel.request.inputs[idx].shape.extend(tmp_shape)
-            self.inputs[key].shape.extend(tmp_shape)
-        # Insert batch dimensions into the voxel coordinates------>change from N x 3 to N x 3+1. Assume batch size 1
-        tmp_data = np.zeros(
-            (self.pc["voxel_coords"].shape[0], self.pc["voxel_coords"].shape[1] + 1),
-            dtype=self.pc["voxel_coords"].dtype,
-        )
-        tmp_data[:, 1:] = self.pc["voxel_coords"].copy()
-        self.pc["voxel_coords"] = tmp_data.copy()
-        del tmp_data
-        # Make sure the data types and shapes are correct for each input before sending them as bytes, this causes wrong array values on the server
-        assert (
-            self.pc["voxels"].dtype
-            == self.input_datatypes[self.inputs["input_0"].datatype]
-        )
-        assert (
-            self.pc["voxel_coords"].dtype
-            == self.input_datatypes[self.inputs["input_1"].datatype]
-        )
-        assert (
-            self.pc["voxel_num_points"].dtype
-            == self.input_datatypes[self.inputs["input_2"].datatype]
-        )
-        self.channel.request.raw_input_contents.extend(
-            [
-                self.pc["voxels"].tobytes(),
-                self.pc["voxel_coords"].tobytes(),
-                self.pc["voxel_num_points"].tobytes(),
-            ]
-        )
-        self.channel.response = (
-            self.channel.do_inference()
-        )  # perform the channel Inference
-        box_array, scores, labels = self.client_postprocess.extract_boxes(
-            self.channel.response
-        )
-        # Show only persons above given confidence threshold
-        indices = np.where((labels == 2) & (scores > 0.4))[0].tolist()
-        # indices = [i for i in range(len(labels))]
-
-        if True:
-            visualizer.draw_scenes(
-                points=self.pc["points"],
-                ref_boxes=box_array[indices, :],
-                ref_scores=scores[indices],
-                ref_labels=labels[indices],
-            )
-
+    # TODO This function needs to be optimized for large number of samples.
     def process_images(self, data):
         t2 = time.time()
         if len(data) == 0:
@@ -559,51 +408,10 @@ class EvaluateInference(BaseInference):
             logger.info('{} image had no ground truth associated with them.'.format(self.no_gt_counter))
         return data
 
-    def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
-        # traverse through the samples
-        infer_array = np.zeros(len(data), dtype=np.float16)
-        for sample, idx in tqdm(
-            zip(data, range(len(data))),
-            total=len(data),
-            colour="GREEN",
-            # file=tqdm_out,
-            desc="Sending inference request to Triton",
-            unit="request",
-        ):
-            # perform an inference on each image, iteratively
-            t3 = time.time()
-            pred = self.seerep_infer_pc(sample["point_cloud"])
-            t4 = time.time()
-            infer_array[idx] = t4 - t3
-            # logger.info('Inference time: {}'.format(t4 - t3))
-            sample["predictions"] = []
-            bbs = []
-            labels = []
-            confidences = []
-            # traverse the predictions for the current pointclouds
-            # for obj in range(len(pred[1])):
-            #     pass
-            # if self.viz:
-            #     pass
-            # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
-            # TODO run evaluation without inference call
-            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
-            # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
-        # Convert groundtruth and predictions to PyCOCO format for evaluation
-        # logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
-        # t5 = time.time()
-        # coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
-        # cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
-        # cocoEval.evaluate()
-        # cocoEval.accumulate()
-        # cocoEval.summarize()
-        # t6 = time.time()
-        # logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
-
     def start_inference(self, model_name, format="coco", modality="images"):
-        schan = seerep_channel.SEEREPChannel(
+        schan = SeerepEndpoint(
             project_name=self.args.seerep_project,
-            socket=self.args.channel_seerep,
+            endpoint_url=self.args.channel_seerep,
             modality=modality,
             format=self.format,  # TODO make it dynamic with Source_Kitti
             visualize=self.viz,
@@ -620,6 +428,7 @@ class EvaluateInference(BaseInference):
             data = schan.run_query_pointclouds(self.args.semantics)
             self.process_pc(data, schan)
     
+    # TODO this should be moved to utils
     def _scale_boxes(self, box, normalized=False):
         """
         box: Bounding box generated for the image size (e.g. 512 x 512) expected by the model at triton server
@@ -639,7 +448,8 @@ class EvaluateInference(BaseInference):
             )
 
         return [xtl, ytl, xbr, ybr]
-
+    
+    # TODO this should be moved to utils
     def _scale_box_array(self, box, source_dim=(512, 512), padded=False):
         """
         box: Bounding box generated for the image size (e.g. 512 x 512) expected by the model at triton server
