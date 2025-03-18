@@ -48,7 +48,7 @@ from seerep.util.fb_helper import (
 # from visual_utils import open3d_vis_utils as visualizer
 from utils import cxcy2xyxy
 
-logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
+logger = Client_logger(name='SEEREP-Client', level=logging.ERROR).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
 
 class APIError(Exception):
@@ -295,9 +295,8 @@ class SeerepEndpoint:
         keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
         '''
         data = []
-        for responseBuf in self._grpc_stub.GetImage(bytes(buffer)):
+        for responseBuf in tqdm(self._grpc_stub.GetImage(bytes(buffer)), desc="Fetching images", unit=" image(s)", colour="blue"):
             sample = {}
-            logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             msguuid = response.Header().UuidMsgs().decode("utf-8")
             sample['uuid'] = msguuid
@@ -348,8 +347,7 @@ class SeerepEndpoint:
         Returns a list of string containing the UUIDs of the data samples
         '''
         data = []
-        for responseBuf in self._grpc_stub.GetImage(bytes(buffer)):
-            sample = {}
+        for responseBuf in tqdm(self._grpc_stub.GetImage(bytes(buffer)), desc="Fetching UUIDs", unit=" uuid(s)", colour="blue"):
             logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             sample_uuid = response.Header().UuidMsgs().decode("utf-8")
@@ -561,6 +559,5 @@ def main():
                                                 model_name=model_name)
     print('uuids')
         
-
 if __name__ == "__main__":
     main()

@@ -1,63 +1,76 @@
 # import time
 import cv2
-import imutils
 import time
 import numpy as np
 import sys
 import logging
+
 from tqdm import tqdm
-# import torchvision
-# import torch
-# import open3d as o3d
-
-from tritonclient.grpc import service_pb2, service_pb2_grpc
-import tritonclient.grpc.model_config_pb2 as mc
-
-# from tools.pointcloud import (
-#     pcd_o3d_to_numpy,
-#     pcd_ros_to_o3d,
-# )
+# TODO move this to triton end point
+from tritonclient.grpc import service_pb2
 from .endpoint import triton_endpoint
-from .base_inference import BaseInference
 from communicator.endpoint.seerep_endpoint import SeerepEndpoint
 from logger import Client_logger, TqdmToLogger
-from utils import cxcy2xyxy, xyxy2cxcy
-# from visual_utils import open3d_vis_utils as visualizer
+from utils import (
+    resize,
+    scale_box_array,
+    process_model_output,
+    visualize_groundtruth,
+)
 
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
-# O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
 
-class EvaluateInference(BaseInference):
+class EvaluateInference:
     """
     This class automatically fetches data from given SEEREP args.seerep_project
     at args.channel_seerep and performs inference on the images using the Triton server
     at args.channel_triton. It uses the gRPC channel.
     """
 
-    def __init__(self, args, channel, client, format="coco"):
+    def __init__(self, 
+                 triton_stub, 
+                 model, 
+                 log_level="error", 
+                 visualize=False):
         """
         channel: channel of type communicator.channel
         client: client of type clients
-
         """
-
-        super().__init__(channel, client)
-
-        self.image = None
-        self.args = args
-        self._register_inference()  # register inference based on type of client
-        self.client_postprocess = client.get_postprocess()  # get postprocess of client
-        self.client_preprocess = client.get_preprocess()
-        self.model_name = client.model_name
+        self.model = model
+        self.model_name = model.model_name
+        self.model_postprocess = model.get_postprocess()
+        self.model_preprocess = model.get_preprocess()
+        self.triton_channel = triton_stub
+        self.seerep_endpoint = 'agrigaia-ur.ni.dfki:9090'
+        self._initialize_model_inputs()
+        self._initialize_misc()
         self.format = format
-        if "COCO" or "coco" in self.model_name:
-            self.class_names = self.client_postprocess.load_class_names(dataset="COCO")
-        elif "CROP" in self.model_name:
-            self.class_names = self.client_postprocess.load_class_names(dataset="CROP")
+        # Initialize miscellaneous parameters
+
+        logging.basicConfig(level=self.log_level[log_level])
+        self.visualize = visualize
+        if self.visualize:
+            self.winname = "Prediction {}".format(self.model_name)
+            cv2.namedWindow(self.winname)
+        self.processed_counter = 0
+        self.no_gt_counter = 0
+
+    def _initialize_model_inputs(self):
+        """
+        Register the GRPC endpoint for Triton server and fetch model metadata and configuration.
+        HTTP endpoint is not supported yet. 
+        """
+        # for GRPC channel
+        if type(self.triton_channel) == triton_endpoint.TritonEndpoint:
+            self._configure_model_params()
         else:
-            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
-            self.class_names = None
+            sys.exit(1)
+
+    def _initialize_misc(self):
+        """
+        Initialize miscellaneous parameters for the triton inference
+        """
         self.input_datatypes = {
             "UINT8": np.dtype(np.uint8),
             "INT16": np.dtype(np.int16),
@@ -66,22 +79,13 @@ class EvaluateInference(BaseInference):
             "FP32": np.dtype(np.float32),
             "FP64": np.dtype(np.float64),
         }
-        log_level = {
+        self.log_level = {
             "info": logging.INFO,
             "warning": logging.WARNING,
             "debug": logging.DEBUG,
             "critical": logging.CRITICAL,
+            "error": logging.ERROR,
         }
-        logging.basicConfig(level=log_level[args.log_level])
-        self.viz = args.visualize
-        if self.viz:
-            self.winname = "Prediction {}".format(self.model_name)
-            cv2.namedWindow(self.winname)
-        self.count = 0
-        self.id_list_preds = []
-        self.id_list_gts = []
-        self.all_predictions = []
-        self.all_groundtruths = []
         self.datumaro_item = {
             "id": "example_img",
             "annotations": [
@@ -113,24 +117,14 @@ class EvaluateInference(BaseInference):
                 "path": ""
             }
         }
-        self.bag_processed = False
-        self.gt_processed = False
-        self.img_processed = False
-        self.processed_counter = 0
-        self.no_gt_counter = 0
-
-    def _register_grpc_endpoint(self):
-        """
-        Register the GRPC endpoint for Triton server and fetch model metadata and configuration.
-        """
-        # for GRPC channel
-        try:
-            if type(self.channel) == triton_endpoint.GRPCChannel:
-                self._configure_model_params()
-        except Exception as e:
-            logger.error(e)
-            sys.exit(1)
-
+        if "COCO" or "coco" in self.model_name:
+            self.class_names = self.model_postprocess.load_class_names(dataset="COCO")
+        elif "CROP" in self.model_name:
+            self.class_names = self.model_postprocess.load_class_names(dataset="CROP")
+        else:
+            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
+            self.class_names = None
+            
     def _configure_model_params(self):
         """
         Fetch and set the model metadata and configuration 
@@ -138,14 +132,14 @@ class EvaluateInference(BaseInference):
         Rest API is not supported. 
         """
         # collect meta data of model and configuration
-        meta_data = self.channel.get_metadata()
+        meta_data = self.triton_channel.get_metadata()
 
         # parse the model requirements from client
-        self.input_metadata, self.output_metadata = self.client.parse_model(
+        self.input_metadata, self.output_metadata = self.model.parse_model(
             meta_data["metadata_response"], meta_data["config_response"].config
         )
-        self.channel.input = [input["name"] for input in self.input_metadata]
-        self.channel.output = [output["name"] for output in self.output_metadata]
+        self.triton_channel.input = [input["name"] for input in self.input_metadata]
+        self.triton_channel.output = [output["name"] for output in self.output_metadata]
 
         self.inputs = {}
         for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
@@ -158,7 +152,7 @@ class EvaluateInference(BaseInference):
                 input["shape"][0] = 10000  # tmp
             self.inputs["input_{}".format(i)].shape.extend(input["shape"])
             # assign the gathered model inputs to the grpc channel
-            self.channel.request.inputs.extend([self.inputs["input_{}".format(i)]])
+            self.triton_channel.request.inputs.extend([self.inputs["input_{}".format(i)]])
 
         self.outputs = {}
         for output, i in zip(self.output_metadata, range(len(self.output_metadata))):
@@ -167,35 +161,9 @@ class EvaluateInference(BaseInference):
             ] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
             self.outputs["output_{}".format(i)].name = output["name"]
             # assign the gathered model outputs to the grpc channel
-            self.channel.request.outputs.extend([self.outputs["output_{}".format(i)]])
+            self.triton_channel.request.outputs.extend([self.outputs["output_{}".format(i)]])
 
-    # TODO this should be moved to utils
-    def resize(self, image):
-        # cv_image = cv2.resize(cv_image, (self.channel.input.shape[2], self.channel.input.shape[1]))
-        tmp = image.copy()
-        s_h, s_w = image.shape[0], image.shape[1]
-        n_h, n_w = self.input_metadata[0]['shape'][1], self.input_metadata[0]['shape'][2]
-        if s_w > s_h:
-            # same aspect ratio
-            padded_image = np.zeros((n_h, n_w, 3), dtype=np.uint8)
-            cv_image = imutils.resize(tmp, width=n_w)
-            # different aspect ratio
-            if cv_image.shape[0] > n_h:
-                cv_image = imutils.resize(tmp, height=n_h)
-            if cv_image.shape[1] > n_w:
-                cv_image = imutils.resize(tmp, width=n_w)
-        else:
-            padded_image = np.zeros((n_h, n_w, 3), dtype=np.uint8)
-            cv_image = imutils.resize(tmp, height=n_h)
-        # padded image
-        padded_image[0 : cv_image.shape[0], 0 : cv_image.shape[1]] = cv_image
-        # named_window = 'resized'
-        # cv2.imshow(named_window, padded_image)
-        # cv2.waitKey()
-        # cv2.destroyWindow(named_window)
-        return padded_image, cv_image.shape[0], cv_image.shape[1]
-
-    def seerep_infer_image(self, image):
+    def triton_infer_image(self, image):
         """
         Perform inference on the images using Triton server
         """
@@ -205,28 +173,29 @@ class EvaluateInference(BaseInference):
         self.orig_image = cv_image.copy()
         s_h, s_w = cv_image.shape[0], cv_image.shape[1]
         # n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
-        cv_image, r_h, r_w = self.resize(cv_image)
+        cv_image, r_h, r_w = resize(cv_image, self.input_metadata)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
         # cv2.waitKey(0)
         # cv2.destroyWindow(named_window)
-        tmp = cv_image.copy()
-        self.image = self.client_preprocess.image_adjust(cv_image)
+        if self.visualize:
+            tmp = cv_image.copy()
+        self.image = self.model_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
         self.image = self.image.astype(
             self.input_datatypes[self.input_metadata[0]['dtype']]
         )
         if self.image is not None:
-            self.channel.request.ClearField("inputs")
-            self.channel.request.ClearField("raw_input_contents")  # Flush the previous image contents
-            self.channel.request.inputs.extend([self.inputs['input_0']])
-            self.channel.request.raw_input_contents.extend([self.image.tobytes()])
-            self.channel.response = self.channel.do_inference()  # Inference
-            self.prediction = self.client_postprocess.extract_boxes(
-                self.channel.response, conf_thres=0.3,
+            self.triton_channel.request.ClearField("inputs")
+            self.triton_channel.request.ClearField("raw_input_contents")  # Flush the previous image contents
+            self.triton_channel.request.inputs.extend([self.inputs['input_0']])
+            self.triton_channel.request.raw_input_contents.extend([self.image.tobytes()])
+            self.triton_channel.response = self.triton_channel.do_inference()  # Inference
+            self.prediction = self.model_postprocess.extract_boxes(
+                self.triton_channel.response, conf_thres=0.3,
             )
             if len(self.prediction[1]) > 0:
-                # if self.viz:
+                # if self.visualize:
                 #     # tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
                 #     for box in self.prediction[0]:
                 #         cv2.rectangle(
@@ -240,25 +209,14 @@ class EvaluateInference(BaseInference):
                 #     cv2.imshow(named_window, tmp)
                 #     cv2.waitKey()
                 #     cv2.destroyWindow(named_window)
-                self.prediction[0] = self._scale_box_array(
-                    self.prediction[0], source_dim=(r_h, r_w), padded=True
+                self.prediction[0] = scale_box_array(
+                    self.prediction[0], 
+                    model_input_dim=(r_h, r_w), 
+                    image_dim=self.orig_size, 
+                    padded=True
                 )
-                if self.format == "kitti":
+                if self.format == "kitti" or self.format == "coco" or self.format == "aitf":
                     persons = np.where(self.prediction[1] == 0)  # filter Pedestrians
-                    return (
-                        self.prediction[0][persons],
-                        self.prediction[1][persons],
-                        self.prediction[2][persons],
-                    )
-                elif self.format == "coco":
-                    persons = np.where(self.prediction[1] == 0)  # filter persons
-                    return (
-                        self.prediction[0][persons],
-                        self.prediction[1][persons],
-                        self.prediction[2][persons],
-                    )
-                elif self.format == "aitf":
-                    persons = np.where(self.prediction[1] == 0)  # filter persons
                     return (
                         self.prediction[0][persons],
                         self.prediction[1][persons],
@@ -270,20 +228,14 @@ class EvaluateInference(BaseInference):
                 return self.prediction
 
     # TODO This function needs to be optimized for large number of samples.
-    def process_images(self, data):
+    def postprocess_seerep_data(self, data):
         t2 = time.time()
         if len(data) == 0:
             logger.critical(
                 "No data samples found in the SEEREP database matching your query"
             )
         else:
-            # logger.info('Fetching time: {} s'.format(np.round(t2 - t1, 3)))
-            color1 = (0, 0, 255)  # red
-            color2 = (255, 255, 255)  # white
-            text_color = (255, 255, 255)
-            color3 = (255, 0, 0)
             # traverse through the images
-            # logger.info('Sending inference request to Triton for each sample')
             infer_array = np.zeros(len(data), dtype=np.float16)
             for sample, seerep_sample_idx in tqdm(
                 zip(data, range(len(data))),
@@ -293,191 +245,59 @@ class EvaluateInference(BaseInference):
                 unit="requests",
                 ascii=True,
             ):
-                if sample['processed']:
+                if False:
                     self.processed_counter += 1
-                elif sample['no_grountruth']:
-                    self.no_gt_counter += 1
+                # elif sample['no_grountruth']:
+                #     self.no_gt_counter += 1
                 else:
                     predictions = {
                     'annotations':[],
                     'dm_format_version':1,
                     }
-                    # perform an inference on each image, iteratively
+                    # perform inference on each image, iteratively
                     t3 = time.time()
-                    pred = self.seerep_infer_image(sample["image"])
+                    pred = self.triton_infer_image(sample["image"])
                     t4 = time.time()
                     infer_array[seerep_sample_idx] = t4 - t3
-                    # logger.info('Inference time: {}'.format(t4 - t3))
-                    tmp = {
-                        'bbox':[],
-                        'id':'1',
-                        'label_id':'',
-                        'score':1,
-                    }
-                    
                     # traverse the predictions for the current image
-                    if len(pred[1]) == 0:
-                        pass
-                    else:
-                        for obj in range(len(pred[1])):
-                            start_cord, end_cord = (pred[0][obj, 0], pred[0][obj, 1]), \
-                                                (pred[0][obj, 2], pred[0][obj, 3])
-                            x, y, w, h = (
-                                np.round((start_cord[0] + end_cord[0]) / 2, 2),
-                                np.round((start_cord[1] + end_cord[1]) / 2, 2),
-                                np.round(end_cord[0] - start_cord[0], 2),
-                                np.round(end_cord[1] - start_cord[1], 2),
-                            )
-                            assert x > 0 and y > 0 and w > 0 and h > 0
-                            tmp['bbox'] = [x, y, w, h]
-                            tmp['score'] = np.round(pred[2][obj], 2)
-                            tmp['id'] = str(int(pred[1][obj]))
-                            tmp['label_id'] = str(seerep_sample_idx)
-                            predictions['annotations'].append(tmp)
-                            tmp = {
-                                'bbox':[],
-                                'id':'1',
-                                'label_id':'',
-                                'score':1,
-                            }
-                            # Visualize the predictions generated by triton inference
-                            if self.viz:
-                                label = self.class_names[int(pred[1][obj])]
-                                (tw, th), _ = cv2.getTextSize(
-                                    # "{} {} %".format(label, round(pred[2][obj] * 100, 2)),
-                                    "{}".format(label),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.9,
-                                    2,
-                                )
-                                # Plot prediction box
-                                cv2.rectangle(
-                                    sample["image"],
-                                    (int(pred[0][obj, 0]), int(pred[0][obj, 1])),
-                                    (int(pred[0][obj, 2]), int(pred[0][obj, 3])),
-                                    color1,
-                                    2,
-                                )
-                                # Plot prediction label background box
-                                cv2.rectangle(
-                                    sample["image"],
-                                    (int(start_cord[0]), int(start_cord[1] - 25)),
-                                    (int(start_cord[0] + tw), int(start_cord[1])),
-                                    color1,
-                                    -1,
-                                )
-                                # Put class label and confidence value
-                                cv2.putText(
-                                    sample["image"],
-                                    # "{} {} %".format(label, round(pred[2][obj], 2) * 100),
-                                    "{}".format(label),
-                                    (int(pred[0][obj, 0]), int(pred[0][obj, 1]) - 5),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.9,
-                                    text_color,
-                                    2,
-                                )
+                    predictions['annotations'] = process_model_output(
+                                                                    sample=sample,
+                                                                    model_output=pred,
+                                                                    sample_idx=seerep_sample_idx,
+                                                                    visualize=self.visualize,
+                                                                    class_names=self.class_names)
                             
-                        data[seerep_sample_idx]['annotations']['items'].append(predictions) 
+                    data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
-                if self.viz:
-                    for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
-                        bbox = ann['bbox']
-                        bbox = cxcy2xyxy(bbox)
-                        label = int(ann['id'])
-                        cv2.rectangle(sample['image'], 
-                                        (bbox[0], bbox[1]), 
-                                        (bbox[2], bbox[3]), 
-                                        color3, 2)
-                        # (tw, th), _ = cv2.getTextSize(self.ann_dict[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                        # cv2.rectangle(sample['image'], 
-                        #                 (bbox[0], bbox[1] - 25), 
-                        #                 (bbox[0] + tw, bbox[1]), 
-                        #                 color3, -1)
-                        cv2.putText(sample['image'], 
-                                    str(label), 
-                                    (bbox[0], bbox[1] - 5), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 
-                                    0.9, (255,255,255), 2)
-                    cv2.imshow(self.winname, sample['image'])
-                    cv2.waitKey() 
-            if self.viz:
+                if self.visualize:
+                    visualize_groundtruth(sample, self.winname, self.class_names)
+            if self.visualize:
                 cv2.destroyWindow(self.winname) 
             logger.info('Processed all inference requests in current data subset!')
             logger.info('{} were skipped since predictions were already stored from previous runs'.format(self.processed_counter))
             logger.info('{} image had no ground truth associated with them.'.format(self.no_gt_counter))
         return data
 
-    def start_inference(self, model_name, format="coco", modality="images"):
-        schan = SeerepEndpoint(
-            project_name=self.args.seerep_project,
-            endpoint_url=self.args.channel_seerep,
+    def start_inference(self, model_name, modality="images"):
+        seerep_channel = SeerepEndpoint(
+            endpoint_url=self.seerep_endpoint,
             modality=modality,
-            format=self.format,  # TODO make it dynamic with Source_Kitti
-            visualize=self.viz,
+            visualize=self.visualize,
         )
-        
-        # TODO! make a decision based on Images or PointCloud or both for selecting service stubs
-        sample_type = "image"
-        if sample_type == "image":
-            data = schan.run_query_images(self.model_name)
-            data = self.process_images(data)
+        if True:
+            project_uuid = seerep_channel.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
+            # data = seerep_channel.fetch_data_by_project([project_uuid], 
+            #                                             model_name=self.model_name)
+            # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
+            uuids = seerep_channel.fetch_uuids_by_project_uuid([project_uuid])
+            data = seerep_channel.fetch_data_by_sample_uuid(uuids, model_name=self.model_name)
+            data = self.postprocess_seerep_data(data)
             # Send predictions back to SEEREP for future use
-            schan.send_dataset(data, category=self.model_name)
-        elif sample_type == "point_clouds":
-            data = schan.run_query_pointclouds(self.args.semantics)
-            self.process_pc(data, schan)
-    
-    # TODO this should be moved to utils
-    def _scale_boxes(self, box, normalized=False):
-        """
-        box: Bounding box generated for the image size (e.g. 512 x 512) expected by the model at triton server
-        return: Scaled bounding box according to the input image from the ros topic.
-        """
-        if normalized:
-            # TODO make it dynamic with mc.Modelshape according to CHW or HWC
-            xtl, xbr = box[0] * self.orig_size[1], box[2] * self.orig_size[1]
-            ytl, ybr = box[1] * self.orig_size[0], box[3] * self.orig_size[0]
-        else:
-            xtl, xbr = box[0] * (self.orig_size[1] / self.input_size[0]), box[2] * (
-                self.orig_size[1] / self.input_size[0]
-            )
-            ytl, ybr = (
-                box[1] * self.orig_size[0] / self.input_size[1],
-                box[3] * self.orig_size[0] / self.input_size[1],
-            )
-
-        return [xtl, ytl, xbr, ybr]
-    
-    # TODO this should be moved to utils
-    def _scale_box_array(self, box, source_dim=(512, 512), padded=False):
-        """
-        box: Bounding box generated for the image size (e.g. 512 x 512) expected by the model at triton server
-        return: Scaled bounding box according to the input image from the ros topic.
-        """
-        # if normalized:
-        #     # TODO make it dynamic with mc.Modelshape according to CHW or HWC
-        #     xtl, xbr = box[0] * self.orig_size[1], box[2] * self.orig_size[1]
-        #     ytl, ybr = box[1] * self.orig_size[0], box[3] * self.orig_size[0]
-        if padded:
-            xtl, xbr = box[:, 0] * (self.orig_size[1] / source_dim[1]), box[:, 2] * (
-                self.orig_size[1] / source_dim[1]
-            )
-            ytl, ybr = (
-                box[:, 1] * self.orig_size[0] / source_dim[0],
-                box[:, 3] * self.orig_size[0] / source_dim[0],
-            )
-        else:
-            xtl, xbr = box[:, 0] * (self.orig_size[1] / self.input_size[1]), box[
-                :, 2
-            ] * (self.orig_size[1] / self.input_size[1])
-            ytl, ybr = (
-                box[:, 1] * self.orig_size[0] / self.input_size[0],
-                box[:, 3] * self.orig_size[0] / self.input_size[0],
-            )
-        xtl = np.reshape(xtl, (len(xtl), 1))
-        xbr = np.reshape(xbr, (len(xbr), 1))
-
-        ytl = np.reshape(ytl, (len(ytl), 1))
-        ybr = np.reshape(ybr, (len(ybr), 1))
-        return np.concatenate((xtl, ytl, xbr, ybr, box[:, 4:6]), axis=1)
+            # seerep_channel.send_dataset(data, category=self.model_name)
+        elif False:
+            buffer = seerep_channel.fetch_data_by_sample(['41e13b76-a890-41e2-acf0-cb415b9cd546',
+                                                        '06ced1d2-e0cc-4254-b56c-aa27532e66fe'], 
+                                                        model_name=self.model_name)
+            data = seerep_channel.process_images(buffer, model_name)
+            # Send predictions back to SEEREP for future use
+            # seerep_channel.send_dataset(data, category=self.model_name)
