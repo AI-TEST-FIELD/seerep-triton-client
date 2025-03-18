@@ -77,71 +77,56 @@ class SeerepEndpoint:
                  endpoint_url='agrigaia-ur.ni.dfki:9090',
                  modality='image',
                  visualize=False):
-        self._meta_data = {}
         self._grpc_stub = None
         self._grpc_stubmeta = None
         self._builder = None
-        self._projectid = None
-        self._msguuid = None
         self.endpoint_url = endpoint_url
-        # self.projname = project_name
-        self.normalized_coors = False
         self.visualize = visualize
 
         # register and initialise the stub
-        self.channel = self.make_channel(secure=False)
         self.vis = visualize
         self.modality = modality
-        self.register_channel()
+        self.intialize_gRPC_stubs()
         # self.ann_dict = self.annotation_dict(format=format)
         if self.visualize:
             self.source_window = 'SEEREP source image'
             cv2.namedWindow(self.source_window)
 
-    def make_channel(self, secure=False):
-        # server with certs
-        if secure:
-            __location__ = os.path.realpath(
-                os.path.join(os.getcwd(), os.path.dirname(__file__)))
-            with open(os.path.join(__location__, 'tls.pem'), 'rb') as f:
-                root_cert = f.read()
-            creds = grpc.ssl_channel_credentials(root_cert)
-
-            channel = grpc.secure_channel(self.endpoint_url, creds) # use with non-local deployment
-
-        else:
-            channel = grpc.insecure_channel(self.endpoint_url) # use with local deployment
-
+    def register_grpc_channel(self):
+        """
+        Returns:
+            A gRPC stub for the SEEREP server
+        """
+        channel = grpc.insecure_channel(self.endpoint_url) 
         return channel
 
-    def register_channel(self):
+    def intialize_gRPC_stubs(self):
         """
-         register grpc triton channel
-         endpoint_url: String, Port and IP address of seerep server
+         register SEEREP gRPC channel
+         endpoint_url: String or IP address and PORT of the SEEREP server
          e.g. agrigaia-ur.ni.dfki:9090
         """
+        grpc_channel = self.register_grpc_channel()
         if self.modality == 'images':
-            self._grpc_stub  = imageService.ImageServiceStub(self.channel)
+            self._grpc_stub  = imageService.ImageServiceStub(grpc_channel)
         elif self.modality == 'pointclouds':
-            self._grpc_stub  = pointCloudService.PointCloudServiceStub(self.channel)
-        self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
+            self._grpc_stub  = pointCloudService.PointCloudServiceStub(grpc_channel)
+        self._grpc_stubmeta = metaOperations.MetaOperationsStub(grpc_channel)
         self._builder = self.init_builder()
-        self._msgUuid = None
-        # self._projectid = self.retrieve_project(self.projname, log=True)
 
     def secondary_channel(self):
         """
-         Establish another channel for sending
-         register grpc triton channel
+         Establish another channel for sending data to SEEREP server
+         register gRPC SEEREP channel
          socket: String, Port and IP address of seerep server
          seerep.robot.10.249.3.13.nip.io:32141
         """
-        grpc_stub  = imageService.ImageServiceStub(self.channel)
-        grpc_stubmeta = metaOperations.MetaOperationsStub(self.channel)
+        grpc_channel = self.register_grpc_channel()
+        grpc_stub  = imageService.ImageServiceStub(grpc_channel)
+        grpc_stubmeta = metaOperations.MetaOperationsStub(grpc_channel)
         builder = self.init_builder()
-        projectid = self._projectid
 
-        return (grpc_stub, grpc_stubmeta, builder, projectid)
+        return (grpc_stub, grpc_stubmeta, builder)
 
     def fetch_channel(self):
         """
@@ -149,48 +134,14 @@ class SeerepEndpoint:
         """
         return self._grpc_stub
 
-    def _grpc_metadata(self):
+    def init_builder(self):
         """
-        TODO Figure out if this is needed for SEEREP
-        Initiate all meta data required for models
+        Initialize flatbuffer builder
         """
-        # Make sure the model matches our requirements, and get some
-        # properties of the model that we need for preprocessing
-        self._meta_data["metadata_request"] = service_pb2.ModelMetadataRequest(
-            name=self.FLAGS.model_name, version=self.FLAGS.model_version)
-        self._meta_data["metadata_response"] = self._grpc_stub.ModelMetadata(self._meta_data["metadata_request"])
+        builder = flatbuffers.Builder(1024)
 
-        self._meta_data["config_request"] = service_pb2.ModelConfigRequest(name=self.FLAGS.model_name,
-                                                                           version=self.FLAGS.model_version)
-        self._meta_data["config_response"] = self._grpc_stub.ModelConfig(self._meta_data["config_request"])
-
-        # set
-        self._set_grpc_members()
-
-    def get_metadata(self):
-        """
-        return meta_data dictionary form
-        @rtype: dictionary
-        """
-        return self._meta_data
-
-    def _set_grpc_members(self):
-        """
-        set essential grpc members
-        """
-        self.input = service_pb2.ModelInferRequest().InferInputTensor()
-        self.request = service_pb2.ModelInferRequest()
-        self.request.model_name = self.FLAGS.model_name
-        self.request.model_version = self.FLAGS.model_version
-        self.output = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-
-    def perform_inference(self):
-        """
-        inference based on grpc_stud
-        @return: inference of grpc
-        """
-        return self._grpc_stub.ModelInfer(self.request)
-
+        return builder
+    
     def deserialize_bytes_float(self, encoded_tensor):
         strs = list()
         offset = 0
@@ -249,10 +200,17 @@ class SeerepEndpoint:
             logger.info("Found project {} with UUID: {}".format(curr_proj, projectuuid))
             return projectuuid
         else:
-            logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(projname, ))
+            logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(project_name))
             sys.exit(0)
             
-    def fetch_data_by_sample(self, data_uuids: list[str], log=False):
+    def fetch_data_by_sample_uuid(self, data_uuids: list[str], model_name: str)->dict:
+        '''
+        Fetches data from SEEREP server based on the data sample UUIDs and looks through all projects. 
+        It also checks if the predictions for the model_name have already been generated for the data samples. 
+        If yes, then sets 'processed' flag to True.
+        Returns a list of dictionaries containing the data samples with the following
+        keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
+        '''
         queryMsg = util_fb.createQuery(
             self._builder,
             # projectUuids=projectUuids,
@@ -261,29 +219,52 @@ class SeerepEndpoint:
             sortByTime=True,  # from version 0.2.5 onwards
         )
         self._builder.Finish(queryMsg)
-        buf = self._builder.Output()
-        data = []
-        for responseBuf in self._grpc_stub.GetImage(bytes(buf)):
-            sample = {}
-            logger.info('Receiving messages from the SEEREP server')
-            response = Image.Image.GetRootAs(responseBuf)
-            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
-            sample['uuid'] = self._msguuid
-            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
-            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
-            sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
-            data.append(sample)
-            
-        return data
+        buffer = self._builder.Output()
+        return self.process_images(buffer, model_name=model_name)
     
-    def fetch_data_by_uuid(self, project_uuids: list[str], log=False):
-        pass
+    def fetch_uuids_by_project_uuid(self, project_uuid: list[str])->list[str]:
+        if isinstance(project_uuid, str):
+            projectUuids = [project_uuid]
+        elif isinstance(project_uuid, list) and all(isinstance(item, str) for item in project_uuid):
+            projectUuids = project_uuid
+        else:
+            logger.error('Please provide a valid project UUID')
+            sys.exit(0)
+        queryMsg = util_fb.createQuery(
+            self._builder,
+            projectUuids=projectUuids,
+            # dataUuids=data_uuids,
+            # withoutData=False,
+            sortByTime=True,  # from version 0.2.5 onwards
+        )
+        self._builder.Finish(queryMsg)
+        buffer = self._builder.Output()
+        return self.process_uuids(buffer)
+    
+    def fetch_data_by_project(self, project_uuids: list[str], model_name: str)->dict:
+        '''
+        Fetches data from SEEREP server based on the project_uuids. It also checks if the predictions for the model_name
+        have already been generated for the data samples. If yes, then sets 'processed' flag to True.
+        Returns a list of dictionaries containing the data samples with the following
+        keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
+        '''
+        queryMsg = util_fb.createQuery(
+            self._builder,
+            # boundingBox=boundingboxStamped,
+            # timeInterval=timeInterval,
+            # labels=['RetinaNet'],
+            # mustHaveAllLabels=False,
+            projectUuids=project_uuids,
+            # instanceUuids=instanceUuids,
+            # dataUuids=dataUuids,
+            # withoutData=False,
+            sortByTime=True,  # from version 0.2.5 onwards
+        )
+        self._builder.Finish(queryMsg)
+        buffer = self._builder.Output()
+        return self.process_images(buffer, model_name=model_name)
 
-    def init_builder(self):
-        builder = flatbuffers.Builder(1024)
-
-        return builder
-
+    # TODO Can this be related to AGROVOC?
     def annotation_dict(self, format='aitf'):
         anns_dict = {}
         class_names= []
@@ -305,15 +286,78 @@ class SeerepEndpoint:
 
         return anns_dict
 
-    def unpack_point_fields(self, point_cloud: pc2.PointCloud2) -> dict:
-        """Extract the point fields from a Flatbuffer pcl message"""
-        return {
-            "name": [point_cloud.Fields(i).Name().decode("utf-8") for i in range(point_cloud.FieldsLength())],
-            "datatype": [point_cloud.Fields(i).Datatype() for i in range(point_cloud.FieldsLength())],
-            "offset": [point_cloud.Fields(i).Offset() for i in range(point_cloud.FieldsLength())],
-            "count": [point_cloud.Fields(i).Count() for i in range(point_cloud.FieldsLength())],
-        }
-
+    def process_images(self, buffer, model_name)->dict:
+        '''
+        buffer: flatbuffer buffer containing the query message 
+        generated using the SEEREP createQuery function
+        model_name: name of the model for which the predictions are to be generated.
+        Returns a list of dictionaries containing the data samples with the following
+        keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
+        '''
+        data = []
+        for responseBuf in self._grpc_stub.GetImage(bytes(buffer)):
+            sample = {}
+            logger.info('Receiving messages from the SEEREP server')
+            response = Image.Image.GetRootAs(responseBuf)
+            msguuid = response.Header().UuidMsgs().decode("utf-8")
+            sample['uuid'] = msguuid
+            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
+            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
+            sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
+            sample['processed'] = False
+            sample['no_grountruth'] = False
+            sample['annotations'] = {
+                "info": {},
+                "categories": {
+                    "label": {
+                        "labels": [],
+                        "attributes": [],
+                    },
+                    "points": {"items": []},
+                },
+                "items": [],
+            }
+            labels: Set[Tuple[str, int]] = set()
+            for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
+                category_with_labels = response.Labels(label_idx)
+                if(not (category_with_labels.Category().decode() == 'labelGeneral')):
+                    item = json.loads(category_with_labels.DatumaroJson().decode())
+                    sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
+                    sample['annotations']["items"].append(item)
+                    for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
+                        labels.add(
+                            (
+                                category_with_labels.Labels(j).Label().decode(),
+                                category_with_labels.Labels(j).LabelIdDatumaro(),
+                            )
+                        )
+            # This condition makes sure we do not predict the labels twice and send them back again to SEEREP
+            if model_name in sample['annotations']['categories']['label']['labels']:
+                sample['processed']  = True
+            if len(sample['annotations']['items'][0]['annotations']) == 0:
+                sample['no_grountruth'] = True
+            data.append(sample.copy())
+        logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
+        return data
+        
+    def process_uuids(self, buffer)->list[str]:
+        '''
+        buffer: flatbuffer buffer containing the query message 
+        generated using the SEEREP createQuery function
+        model_name: name of the model for which the predictions are to be generated.
+        Returns a list of string containing the UUIDs of the data samples
+        '''
+        data = []
+        for responseBuf in self._grpc_stub.GetImage(bytes(buffer)):
+            sample = {}
+            logger.info('Receiving messages from the SEEREP server')
+            response = Image.Image.GetRootAs(responseBuf)
+            sample_uuid = response.Header().UuidMsgs().decode("utf-8")
+            data.append(sample_uuid)
+        logger.info('Fetched {} UUIDs from the current SEEREP project'.format(len(data)))
+        return data
+    
+    # TODO run query will be deprecated. Out of date.
     def run_query_images(self, model_name='None'):
         projectUuids = [self._projectid]
         # timeMin = createTimeStamp(self._builder, 1687445582, 0)
@@ -410,122 +454,8 @@ class SeerepEndpoint:
         if self.vis:
             cv2.destroyWindow(self.source_window)
         return data
-
-    def run_query_pointclouds(self, *args):
-        projectuuidString = self._builder.CreateString(self._projectid)
-        Query.StartProjectuuidVector(self._builder, 1)
-        self._builder.PrependUOffsetTRelative(projectuuidString)
-        projectuuidMsg = self._builder.EndVector()
-        projectUuids = [projectuuidString]
-        queryMsg = util_fb.createQuery(
-            self._builder,
-            # boundingBox=boundingboxStamped,
-            # timeInterval=timeInterval,
-            # labels=labelCategory,
-            # mustHaveAllLabels=False,
-            projectUuids=projectUuids,
-            # instanceUuids=instanceUuids,
-            # dataUuids=dataUuids,
-            withoutData=False,
-            sortByTime=True,  # from version 0.2.5 onwards
-        )
-        self._builder.Finish(queryMsg)
-        buf = self._builder.Output()
-        # Collect list of all data samples returned from SEEREP into data
-        data = []
-        # Collect the UUIDs and data from each sample sent by SEEREP project.
-        sample = {}
-        # TODO the num_samples should be replaced by the total number of samples inside the seerep project
-        num_samples = 100
-        for responseBuf, curr_sample in tqdm(zip(self._grpc_stub.GetPointCloud2(bytes(buf)),
-                                    range(num_samples)),
-                                    total=num_samples,
-                                    colour='GREEN',
-                                    # file=tqdm_out,
-                                    desc='Receiving pointclouds from the SEEREP server',
-                                    unit=" samples"):
-            # logger.info('Receiving pointclouds from the SEEREP server')
-            response = pc2.PointCloud2.GetRootAs(responseBuf)
-            self._msguuid = response.Header().UuidMsgs().decode("utf-8")
-            height = response.Width()
-            width = response.Height()
-            # TODO change the decoding to numpy for cleaner implementation
-            # point_fields = self.unpack_point_fields(response)
-            # dtypes = np.dtype(
-            #     {
-            #         "names": point_fields["name"],
-            #         "formats": [Point_Field_Datatype[datatype] for datatype in point_fields['datatype']],
-            #         "offsets": point_fields["offset"],
-            #         "itemsize": response.PointStep(),
-            #     }
-            # )
-            # decoded_payload = np.frombuffer(response.DataAsNumpy(), dtype=dtypes)
-            # reshaped_data = np.reshape(decoded_payload, (response.Height(), response.Width()))
-
-            sample['uuid'] = self._msguuid
-            raw_data = response.DataAsNumpy()
-            fields = {}
-            dtype = None
-            for j in range(response.FieldsLength()):
-                fields[response.Fields(j).Name().decode('utf-8')] = {}
-                fields[response.Fields(j).Name().decode('utf-8')]['offset'] = response.Fields(j).Offset()
-                fields[response.Fields(j).Name().decode('utf-8')]['dtype'] = response.Fields(j).Datatype()
-                dtype = Point_Field_Datatype[response.Fields(j).Datatype()]
-                # https://docs.python.org/2/library/struct.html
-                if dtype == np.int16:    # 16 bit short
-                    c = 'h'
-                elif dtype == np.uint16:    # 16 bit unsigned-short
-                    c = 'H'
-                elif dtype == np.int32:    # 32 bit int
-                    c = 'i'
-                elif dtype == np.uint32:    # 32 bit unsigned int
-                    c = 'I'
-                elif dtype == np.float32:   # 32 bit float
-                    c = 'f'
-                elif dtype == np.float64:   # 64 bit double
-                    c = 'd'
-                else:
-                    print('Invalid data type')
-                fields[response.Fields(j).Name().decode('utf-8')]['data_string'] = c
-                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c)
-            for field in fields:
-                strs = list()
-                for i in range(fields[field]['offset'], raw_data.shape[0], response.PointStep()):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
-                    sb = struct.unpack(fields[field]['data_string'], raw_data[i : i + fields[field]['size']])
-                    strs.append(sb)
-                fields[field]['data'] = (np.array(strs, dtype=np.object_))
-                strs = []
-            sample['point_cloud'] = copy(fields)
-            if False:
-                from math import sin, cos
-                angle=15
-                pc = np.zeros((height*width, 3), dtype=np.float64)
-                pc[:, 0] = fields['x']['data'][:, 0]
-                pc[:, 1] = fields['y']['data'][:, 0]
-                pc[:, 2] = fields['z']['data'][:, 0]
-                ry = R.from_euler('y', 30, degrees=True).as_matrix()
-                rz = R.from_euler('z', 90, degrees=True).as_matrix()
-                rotation_matrix = np.array([[cos(angle), 0, sin(angle)],
-                                [0, 1, 0],
-                                [-sin(angle), 0, cos(angle)]])
-                # rotation_matrix = np.array([[0.82638931, -0.02497454,  0.56254509],
-                #                             [0.01212522,  0.99957356,  0.02656451],
-                #                             [-0.56296864, -0.01513165, 0.82633973]])
-                pc = np.matmul(ry, pc.T).T
-                pc = np.matmul(rz, pc.T).T
-                pc += [0., 0., -1.026558971]
-                # pc = r.apply(pc)
-                visualizer.draw_scenes(pc)
-            # Store the sample into data collection
-            data.append(sample)
-            # flush the sample data for new incoming samples
-            sample={}
-            curr_sample+=1
-            if curr_sample==0:
-                break
-        logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
-        return data
-
+    
+    # TODO Send dataset should also be on project or data UUID basis. Out of date.
     def send_dataset(self, data, category):
         """
             Send a Datumaro dataset to SEEREP.
@@ -544,9 +474,6 @@ class SeerepEndpoint:
 
             """
         image_stub, grpc_stubmeta, builder, projectid = self.secondary_channel()
-        # timeMin = createTimeStamp(builder, 1687445582, 0)
-        # timeMax = createTimeStamp(builder, 1687445586, 0)
-        # timeInterval = createTimeInterval(builder, timeMin, timeMax)
         query = util_fb.createQuery(
                             builder,
                             projectUuids=[projectid],
@@ -619,7 +546,21 @@ class SeerepEndpoint:
         return label_list
 
 def main():
-    schan = SEEREPChannel()
+    model_name = 'retina_big'
+    project_name = 'EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0'
+    seerep_channel = SeerepEndpoint(
+            endpoint_url='agrigaia-ur.ni.dfki:9090',
+            modality='image',
+            visualize=True,
+        )
+    project_uuid = seerep_channel.get_project_uuid(project_name)
+    data = seerep_channel.fetch_data_by_project([project_uuid], 
+                                                model_name=model_name)
+    uuids = seerep_channel.fetch_uuids_by_project_uuid([project_uuid])
+    data = seerep_channel.fetch_data_by_sample(uuids, 
+                                                model_name=model_name)
+    print('uuids')
+        
 
 if __name__ == "__main__":
     main()
