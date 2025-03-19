@@ -103,10 +103,30 @@ def resize(image, input_metadata: list[dict]):
     # cv2.destroyWindow(named_window)
     return padded_image, cv_image.shape[0], cv_image.shape[1]
     
-def visualize_groundtruth(sample: dict, cv_window_name: str, class_names: list):
-    # TODO add support for either ground truth or predictions
-    
-    for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
+def visualize(sample: dict, 
+            cv_window_name: str, 
+            class_names: list, 
+            new_model_key: False,
+            model_name=None,
+            ):
+    """
+    This function visualizes the image sample with the bounding boxes and class labels.
+    The bounding boxes are fetched from the sample dictionary. The sample dictionary can have multiple annotations.
+    Index 0 is the ground truth and index -1 is the predictions from the model execution. If more than two indices exist,
+    they are from previous runs / models which can be fetched by model_name parameter.
+    sample: dict: The sample dictionary containing the image and annotations in datumaro format.
+    cv_window_name: str: The name of the window to display the image.
+    class_names: list: The list of class names.
+    new_model_key: bool: The flag to indicate if the model predictions are new or not compared to SEEREP version. 
+    model_name: str: The name of the model to fetch the annotations from the sample dictionary based on Triton model name stored in SEEREP. 
+    """
+    if new_model_key:
+        model_index = -1
+    elif new_model_key == False and model_name != None:
+        model_index = sample['annotations']['categories']['label']['labels'].index(model_name)
+    else:
+        model_index = 0
+    for ann_idx, ann in enumerate(sample['annotations']['items'][model_index]['annotations']):
         bbox = ann['bbox']
         bbox = cxcy2xyxy(bbox)
         label = int(ann['id'])
@@ -135,10 +155,7 @@ def process_model_output(sample,
     """
     
     """
-    predictions = {
-                'annotations':[],
-                'dm_format_version':1,
-                    }
+    predictions = []
     tmp = {
             'bbox':[],
             'id':'1',
@@ -163,7 +180,7 @@ def process_model_output(sample,
             tmp['id'] = str(int(model_output[1][obj]))
             tmp['label_id'] = str(sample_idx)
             tmp['label'] = class_names[int(model_output[1][obj])]
-            predictions['annotations'].append(tmp)
+            predictions.append(tmp)
             tmp = {
                 'bbox':[],
                 'id':'1',

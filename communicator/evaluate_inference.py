@@ -15,7 +15,7 @@ from utils import (
     resize,
     scale_box_array,
     process_model_output,
-    visualize_groundtruth,
+    visualize,
 )
 
 logger = Client_logger(name="Triton-Client", level=logging.INFO).get_logger()
@@ -163,17 +163,13 @@ class EvaluateInference:
             # assign the gathered model outputs to the grpc channel
             self.triton_channel.request.outputs.extend([self.outputs["output_{}".format(i)]])
 
-    def triton_infer_image(self, image):
+    def triton_infer_image(self, cv_image):
         """
         Perform inference on the images using Triton server
         """
-        # convert numpy array to cv2
-        cv_image = image
-        self.orig_size = cv_image.shape[0:2]
         self.orig_image = cv_image.copy()
-        s_h, s_w = cv_image.shape[0], cv_image.shape[1]
-        # n_h, n_w = self.channel.input.shape[1], self.channel.input.shape[2]
-        cv_image, r_h, r_w = resize(cv_image, self.input_metadata)
+        original_h, original_w = cv_image.shape[0], cv_image.shape[1]
+        cv_image, model_input_h, model_input_w = resize(cv_image, self.input_metadata)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
         # cv2.waitKey(0)
@@ -192,9 +188,15 @@ class EvaluateInference:
             self.triton_channel.request.raw_input_contents.extend([self.image.tobytes()])
             self.triton_channel.response = self.triton_channel.do_inference()  # Inference
             self.prediction = self.model_postprocess.extract_boxes(
-                self.triton_channel.response, conf_thres=0.3,
+                self.triton_channel.response,
             )
             if len(self.prediction[1]) > 0:
+                self.prediction[0] = scale_box_array(
+                    self.prediction[0], 
+                    model_input_dim=(model_input_h, model_input_w), 
+                    image_dim=(original_h, original_w), 
+                    padded=True
+                )
                 # if self.visualize:
                 #     # tmp = cv2.cvtColor(tmp, cv2.COLOR_RGB2BGR).astype(np.uint8)
                 #     for box in self.prediction[0]:
@@ -209,12 +211,6 @@ class EvaluateInference:
                 #     cv2.imshow(named_window, tmp)
                 #     cv2.waitKey()
                 #     cv2.destroyWindow(named_window)
-                self.prediction[0] = scale_box_array(
-                    self.prediction[0], 
-                    model_input_dim=(r_h, r_w), 
-                    image_dim=self.orig_size, 
-                    padded=True
-                )
                 if self.format == "kitti" or self.format == "coco" or self.format == "aitf":
                     persons = np.where(self.prediction[1] == 0)  # filter Pedestrians
                     return (
@@ -270,7 +266,12 @@ class EvaluateInference:
                     data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
                 if self.visualize:
-                    visualize_groundtruth(sample, self.winname, self.class_names)
+                    visualize(sample, 
+                                            'self.winname', 
+                                            self.class_names,
+                                            new_model_key=False,
+                                            model_name=None
+                                            )
             if self.visualize:
                 cv2.destroyWindow(self.winname) 
             logger.info('Processed all inference requests in current data subset!')
@@ -282,7 +283,7 @@ class EvaluateInference:
         seerep_channel = SeerepEndpoint(
             endpoint_url=self.seerep_endpoint,
             modality=modality,
-            visualize=self.visualize,
+            # visualize=self.visualize,
         )
         if True:
             project_uuid = seerep_channel.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
