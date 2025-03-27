@@ -14,19 +14,23 @@ import numpy as np
 import struct
 import uuid
 from tqdm.auto import tqdm
+from typing import List
 from copy import copy
 from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
+from grpc import Channel
 
 from seerep.fb import (
     Boundingbox, 
     Empty, 
+    FrameQuery,
     Header, 
     Image, 
     Point, 
     ProjectInfos, 
     Query, 
+    StringVector,
     TimeInterval, 
     Timestamp
 )
@@ -39,13 +43,16 @@ from seerep.fb import (
     tf_service_grpc_fb as tfService,
     TransformStamped
 )
+
 from seerep.util.fb_helper import (
     createHeader,
     createTimeStamp,
     createTransformStampedQuery,
     createQuery
     )
+from seerep.util.common import get_gRPC_channel
 from visual_utils import open3d_vis_utils as visualizer
+import yaml
 
 logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
@@ -386,7 +393,40 @@ class SEEREPChannel():
         data = self.run_query_tf(data)
         return data
     
-    def run_query_tf(self, data: list[dict]) -> list[dict]:
+    def run_query_tf_frames(self, target_proj_uuid: str = None, grpc_channel: Channel = get_gRPC_channel()
+                            )-> dict:
+        """
+        Flat buffers based gRPC query for frames
+        Args:
+            target_proj_uuid: UUID of the project to query frames from
+            grpc_channel: gRPC channel to use for the query
+        Returns:
+            frame_dict: dictionary containing the frames
+        https://github.com/DFKI-NI/seerep/blob/main/examples/python/gRPC/tf/gRPC_pb_queryFrames.py
+        """
+        stub = tfService.TfServiceStub(grpc_channel)
+        builder = self.init_builder()
+        projectUuid = builder.CreateString(target_proj_uuid)
+        FrameQuery.Start(builder)
+        FrameQuery.AddProjectuuid(builder, projectUuid)
+        frameQuery = FrameQuery.End(builder)
+        builder.Finish(frameQuery)
+        buf = builder.Output()
+        
+        responseBuf = stub.GetFrames(bytes(buf))
+        response = StringVector.StringVector.GetRootAs(responseBuf)
+        for idx in range(response.StringVectorLength()):
+            frame_str = response.StringVector(idx).decode("utf-8")
+            try:
+                frame_dict = yaml.safe_load(frame_str)
+            except yaml.YAMLError as e:
+                logger.error(f"Error parsing frame string as YAML: {e}")
+        return frame_dict
+        
+    
+    def run_query_tf(self, 
+                     data: list[dict],
+                     parent_frame: str='base_link',) -> list[dict]:
         """
         Query the TF for each pointcloud
         Args:
@@ -394,6 +434,7 @@ class SEEREPChannel():
         Returns:
             data: list of dictionaries containing pointcloud data with TFs
         """
+        frames = self.run_query_tf_frames(self._projectid, self.channel)
         tf_stub, builder = self.tf_channel()
         for sample, index in tqdm(zip(data, range(len(data))),
                             total=len(data),
@@ -408,11 +449,15 @@ class SEEREPChannel():
                 frame=sample['sensor_name'],
                 projectUuid=self._projectid
             )
-            tf_query = createTransformStampedQuery(
-                builder=builder,
-                header=header,
-                childFrameId='base_link',
-            )
+            if parent_frame in frames:
+                tf_query = createTransformStampedQuery(
+                    builder=builder,
+                    header=header,
+                    childFrameId=parent_frame,  # map_odom odom_base_link
+                )
+            else:
+                logger.error(f"Parent frame {parent_frame} not found in the following list of frames:")
+                logger.error(", \n".join(frames.keys()))
             builder.Finish(tf_query)
             tf_buf: bytearray = tf_stub.GetTransformStamped(bytes(builder.Output()))
             try:

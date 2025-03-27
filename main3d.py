@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import yaml
 
 from communicator import EvaluateInference
 from communicator.channel import grpc_channel, seerep_channel

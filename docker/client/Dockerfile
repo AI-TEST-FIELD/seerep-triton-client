@@ -85,5 +85,6 @@ RUN cd /opt/dependencies/OpenPCDet && \
 
 RUN echo "source ${VIRTUAL_ENV}/bin/activate" >> /etc/bash.bashrc
 ENV PYTHONPATH=/opt/dependencies/OpenPCDet
+ENV PROJECT_ROOT=/workspace
 SHELL ["/bin/bash", "-c"]
 WORKDIR /workspace
