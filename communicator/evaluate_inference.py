@@ -231,70 +231,8 @@ class EvaluateInference(BaseInference):
             else:
                 return self.prediction
 
-    def preprocess_pc(self, sample: dict) -> np.ndarray:
-        """
-        Processing Steps:
-            1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
-            2. Translate Point Cloud into the Dataset specific detector training dataset frame. Adjusts the Point Cloud to mimic the relative Lidar position from the detectors training dataset.
-            3. Normalize feature field [0, 1], by maximal possible feature value (reflectance/intensity = 255).
-
-
-        Args:
-            sample : Dictionary containing the point cloud and sensor specific information.
-            sensor_name : Sensor specific name tag associated with the point cloud.
-            dataset_name : The name of the dataset used for training of the object detector.
-
-        Return:
-            preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
-
-        """
-
-        # dictionary for sensor and dataset transformations
-        TRANSFORM_DICT = {
-            # "base_transformation": {
-            #     "ouster": [
-            #         [0.82638931, -0.02497454, 0.56254509, 0.191287],
-            #         [0.01212522, 0.99957356, 0.02656451, -0.35169424],
-            #         [-0.56296864, -0.01513165, 0.82633973, 1.90064396],
-            #         [0.0, 0.0, 0.0, 1.0],
-            #     ],
-            #     "velodyne": [],
-            #     "robosense": [],
-            # },
-            "dataset_translation": {
-                "kitti": [0.0, 0.0, -1.026558971],
-                "nuscenes": [],
-            },
-        }
-        transform_matrix = sample['transform_matrix']
-        dataset_translation = TRANSFORM_DICT['dataset_translation'][sample['dataset_name']]
-
-        MAX_FEATURE_VALUE = 255
-
-        # sensor and data specific params
-        sensor_to_robot_base_transform = o3d.core.Tensor(
-            transform_matrix, device=O3D_DEVICE
-        )
-        robot_base_to_train_dataset_translation = o3d.core.Tensor(
-            dataset_translation, device=O3D_DEVICE
-        )
-        feature_field = (sample['lidar_features'])
-
-        # preprocessing steps
-        raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=sample['point_cloud'], feature_field=feature_field)
-        preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
-        preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
-            robot_base_to_train_dataset_translation
-        )
-        preprocessed_np_pcd = pcd_o3d_to_numpy(
-            o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
-        )
-        preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
-        return preprocessed_np_pcd
-
-    def seerep_infer_pc(self, sample: dict):
-        self.pc = self.preprocess_pc(sample=sample)
-        self.pc = self.client_preprocess.filter_pc(self.pc)
+    def seerep_infer_pc(self, sample: np.array):
+        self.pc = self.client_preprocess.filter_pc(sample)
         num_voxels = self.pc["voxels"].shape[0]
         self.channel.request.ClearField(
             "raw_input_contents"
@@ -465,7 +403,7 @@ class EvaluateInference(BaseInference):
         ):
             # perform an inference on each image, iteratively
             t3 = time.time()
-            pred = self.seerep_infer_pc(sample["point_cloud"], sample["sensor_name"], sample["dataset_name"], sample["transform_matrix"])
+            pred = self.seerep_infer_pc(sample["point_cloud_processed"])
             t4 = time.time()
             infer_array[idx] = t4 - t3
             # logger.info('Inference time: {}'.format(t4 - t3))
@@ -505,7 +443,7 @@ class EvaluateInference(BaseInference):
             data = schan.run_query_images(self.args.semantics)
             self.process_images(data, schan)
         elif self.modality == "pointcloud":
-            data = schan.run_query_pointclouds()
+            data = schan.run_query_pointclouds(model_name)
             self.process_pc(data, schan)
         else:
             logger.error("Invalid modality: {}".format(self.modality))

@@ -7,18 +7,20 @@ import grpc
 from tritonclient.grpc import service_pb2, service_pb2_grpc
 import tritonclient.grpc.model_config_pb2 as mc
 
-import os
+# import os
 import sys
-import cv2
+# import cv2
 import numpy as np
 import struct
-import uuid
+# import uuid
+import yaml
 from tqdm.auto import tqdm
-from typing import List
+# from typing import List
 from copy import copy
 from scipy.spatial.transform import Rotation as R
 import flatbuffers
 import grpc
+import open3d as o3d
 from grpc import Channel
 
 from seerep.fb import (
@@ -52,10 +54,14 @@ from seerep.util.fb_helper import (
     )
 from seerep.util.common import get_gRPC_channel
 from visual_utils import open3d_vis_utils as visualizer
-import yaml
+from tools.pointcloud import (
+    pcd_o3d_to_numpy,
+    pcd_ros_to_o3d,
+)
 
 logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
+O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
 
 Point_Field_Datatype =  {
     0: 'unset',
@@ -292,12 +298,13 @@ class SEEREPChannel():
     def run_query_images(self, *args):
         pass
     
-    def run_query_pointclouds(self) -> list[dict]:
+    def run_query_pointclouds(self, model_name:str) -> list[dict]:
         """
         Query the pointclouds from the SEEREP server
         Returns:
             data: list of dictionaries containing pointcloud data
         """
+        self.model_name = model_name
         projectUuids = [self._projectid]
         queryMsg = createQuery(
             self._builder,
@@ -380,7 +387,7 @@ class SEEREPChannel():
                 # rz = R.from_euler('z', 90, degrees=True).as_matrix()
                 # pc = np.matmul(ry, pc.T).T
                 # pc = np.matmul(rz, pc.T).T
-                pc += [0., 0., -1.026558971]
+                # pc += [0., 0., -1.026558971]
                 visualizer.draw_scenes(pc)
             # Store the sample into data collection
             data.append(sample)
@@ -391,7 +398,72 @@ class SEEREPChannel():
                 break
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         data = self.run_query_tf(data)
+        data = self.preprocess_pc(data)
         return data
+    
+    def preprocess_pc(self, pointcloud_data: dict) -> dict:
+        """
+        Processing Steps:
+            1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
+            2. Translate Point Cloud into the Dataset specific detector training dataset frame. Adjusts the Point Cloud to mimic the relative Lidar position from the detectors training dataset.
+            3. Normalize feature field [0, 1], by maximal possible feature value (reflectance/intensity = 255).
+
+
+        Args:
+            sample : Dictionary containing the point cloud and sensor specific information.
+            sensor_name : Sensor specific name tag associated with the point cloud.
+            dataset_name : The name of the dataset used for training of the object detector.
+
+        Return:
+            preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
+
+        """
+
+        # dictionary for sensor and dataset transformations
+        if 'kitti' in self.model_name:
+            dataset_translation = [0.0, 0.0, -1.026558971]
+        # TODO add nuscenes translation
+        elif 'nuscenes' in self.model_name: 
+            dataset_translation = [0.0, 0.0, -1.026558971]  
+        else:
+            logger.error(f"Dataset {self.model_name} not supported. Please use kitti or nuscenes.")
+            return None
+        for sample in tqdm(pointcloud_data,
+                                    desc='Transforming pointclouds',
+                                    unit="samples",
+                                    colour='YELLOW',
+                                    total=len(pointcloud_data)):
+            # check if the sample has a tf
+            if sample['transform_matrix'] is not None:
+                # get the transform matrix for the current pc sample
+                transform_matrix = np.array(sample['transform_matrix']).reshape(4, 4)
+            else:
+                logger.error(f"Sample {sample['uuid']} does not have a tf. Skipping...")
+                continue
+            
+            MAX_FEATURE_VALUE = 255
+            # sensor and data specific params
+            sensor_to_robot_base_transform = o3d.core.Tensor(
+                transform_matrix, device=O3D_DEVICE
+            )
+            robot_base_to_train_dataset_translation = o3d.core.Tensor(
+                dataset_translation, device=O3D_DEVICE
+            )
+            feature_field = sample['lidar_feature']
+
+            # preprocessing steps
+            raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=sample['point_cloud'], feature_field=feature_field)
+            preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
+            preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
+                robot_base_to_train_dataset_translation
+            )
+            preprocessed_np_pcd = pcd_o3d_to_numpy(
+                o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
+            )
+            preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
+            pointcloud_data[pointcloud_data.index(sample)]['point_cloud_processed'] = preprocessed_np_pcd
+            
+        return pointcloud_data
     
     def run_query_tf_frames(self, target_proj_uuid: str = None, grpc_channel: Channel = get_gRPC_channel()
                             )-> dict:
@@ -423,7 +495,6 @@ class SEEREPChannel():
                 logger.error(f"Error parsing frame string as YAML: {e}")
         return frame_dict
         
-    
     def run_query_tf(self, 
                      data: list[dict],
                      parent_frame: str='base_link',) -> list[dict]:
@@ -469,7 +540,13 @@ class SEEREPChannel():
                 qy = tf.Transform().Rotation().Y()
                 qz = tf.Transform().Rotation().Z()
                 qw = tf.Transform().Rotation().W()
-                data[index]['tf'] = [x, y, z, qx, qy, qz, qw]
+                quaternion = [qw, qx, qy, qz] # w, x, y, z
+                rotation_matrix = o3d.geometry.get_rotation_matrix_from_quaternion(quaternion)
+                # Combine translation and rotation into a 4x4 transformation matrix
+                transformation_matrix = np.eye(4)
+                transformation_matrix[:3, :3] = rotation_matrix
+                transformation_matrix[:3, 3] = [x, y, z]
+                data[index]['transform_matrix'] = transformation_matrix.tolist()
             except Exception as e:
                 logger.error(f"Error querying TF for pointcloud {sample['uuid']}: {e}")
                 data[index]['tf'] = None
