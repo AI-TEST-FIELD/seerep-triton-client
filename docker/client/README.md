@@ -2,11 +2,11 @@
 
 ## Standart Installation
 ```bash
-sudo -H DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile --platform linux/amd64 -t niqbal996/triton-client:22.04-py3-PCDet .
+sudo -H DOCKER_BUILDKIT=1 docker build -f docker/client/Dockerfile --platform linux/amd64 -t niqbal996/triton-client:22.12-py3-PCDet .
 ```
 
 ```bash
-docker run -it --runtime=nvidia --net=host --name=triton-client  --ipc=host -e PYTHONPATH=/opt/depencies/OpenPCDet niqbal996/triton-client:22.04-py3-PCDet 
+docker run -it --runtime=nvidia --net=host --name=triton-client --ipc=host niqbal996/triton-client:22.12-py3-PCDet 
 ```
 
 ## Installation with X11 Forwarding

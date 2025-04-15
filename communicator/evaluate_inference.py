@@ -121,6 +121,8 @@ class EvaluateInference:
             self.class_names = self.model_postprocess.load_class_names(dataset="COCO")
         elif "CROP" in self.model_name:
             self.class_names = self.model_postprocess.load_class_names(dataset="CROP")
+        elif "KITTI" in self.model_name or "kitti" in self.model_name.lower():
+            self.class_names = self.client_postprocess.load_class_names(dataset="KITTI")
         else:
             logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
             self.class_names = None
@@ -278,6 +280,103 @@ class EvaluateInference:
             logger.info('{} were skipped since predictions were already stored from previous runs'.format(self.processed_counter))
             logger.info('{} image had no ground truth associated with them.'.format(self.no_gt_counter))
         return data
+
+
+    def seerep_infer_pc(self, sample: np.array, 
+                        confidence_threshold=0.4, 
+                        class_idx=2, 
+                        visualize=False):
+        """
+        Perform inference on the point cloud data.
+        :param sample: Point cloud data
+        :param confidence_threshold: Confidence threshold for filtering predictions
+        :param class_idx: Class index for filtering predictions
+        :return: Filtered predictions
+        """
+        self.pc = self.client_preprocess.filter_pc(sample)
+        num_voxels = self.pc["voxels"].shape[0]
+        self.channel.request.ClearField(
+            "raw_input_contents"
+        )  # Flush the previous sample content
+        for key, idx in zip(self.inputs, range(len(self.inputs))):
+            tmp_shape = self.inputs[key].shape
+            self.inputs[key].ClearField("shape")
+            tmp_shape[0] = num_voxels
+            self.channel.request.inputs[idx].ClearField("shape")
+            self.channel.request.inputs[idx].shape.extend(tmp_shape)
+            self.inputs[key].shape.extend(tmp_shape)
+        # Insert batch dimensions into the voxel coordinates------>change from N x 3 to N x 3+1. Assume batch size 1
+        tmp_data = np.zeros(
+            (self.pc["voxel_coords"].shape[0], self.pc["voxel_coords"].shape[1] + 1),
+            dtype=self.pc["voxel_coords"].dtype,
+        )
+        tmp_data[:, 1:] = self.pc["voxel_coords"].copy()
+        self.pc["voxel_coords"] = tmp_data.copy()
+        del tmp_data
+        # Make sure the data types and shapes are correct for each input before sending them as bytes, this causes wrong array values on the server
+        assert (
+            self.pc["voxels"].dtype
+            == self.input_datatypes[self.inputs["input_0"].datatype]
+        )
+        assert (
+            self.pc["voxel_coords"].dtype
+            == self.input_datatypes[self.inputs["input_1"].datatype]
+        )
+        assert (
+            self.pc["voxel_num_points"].dtype
+            == self.input_datatypes[self.inputs["input_2"].datatype]
+        )
+        self.channel.request.raw_input_contents.extend(
+            [
+                self.pc["voxels"].tobytes(),
+                self.pc["voxel_coords"].tobytes(),
+                self.pc["voxel_num_points"].tobytes(),
+            ]
+        )
+        self.channel.response = (
+            self.channel.do_inference()
+        )  # perform the channel Inference
+        box_array, scores, labels = self.client_postprocess.extract_boxes(
+            self.channel.response
+        )
+        
+        # Show only persons above given confidence threshold
+        indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
+        # indices = [i for i in range(len(labels))]
+
+        if visualize:
+            visualizer.draw_scenes(
+                points=self.pc["points"],
+                ref_boxes=box_array[indices, :],
+                ref_scores=scores[indices],
+                ref_labels=labels[indices],
+            )
+
+    def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
+        # traverse through the samples
+        infer_array = np.zeros(len(data), dtype=np.float16)
+        for sample, idx in tqdm(
+            zip(data, range(len(data))),
+            total=len(data),
+            colour="GREEN",
+            desc="Sending inference request to Triton",
+            unit="request(s)",
+        ):
+            # perform an inference on each image, iteratively
+            t3 = time.time()
+            # pc = np.zeros_like(sample["point_cloud_processed"])
+            # pc[:, 0] = sample["point_cloud"]["x"]["data"][:, 0]
+            # pc[:, 1] = sample["point_cloud"]["y"]["data"][:, 0]
+            # pc[:, 2] = sample["point_cloud"]["z"]["data"][:, 0]
+            # pc[:, 3] = sample["point_cloud"]["reflectivity"]["data"][:, 0]/255.0
+            pred = self.seerep_infer_pc(sample["point_cloud_processed"])
+            # pred = self.seerep_infer_pc(pc)
+            t4 = time.time()
+            infer_array[idx] = t4 - t3
+            # logger.info('Inference time: {}'.format(t4 - t3))
+            # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
+        # t6 = time.time()
+        # logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
 
     def start_inference(self, model_name, modality="images"):
         seerep_channel = SeerepEndpoint(

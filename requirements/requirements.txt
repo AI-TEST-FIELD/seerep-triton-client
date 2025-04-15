@@ -1,0 +1,22 @@
+seerep-grpc<=0.3.5
+pycocotools
+# fast-coco-eval
+tritonclient[all]<=2.41.0
+imutils
+# 3D inference with OpenPCDet 
+pyquaternion
+# sharedarray
+tensorboardx
+numba==0.56.4
+scikit-image==0.19.3
+easydict
+kornia==0.6.8
+av2
+spconv-cu118
+tqdm
+pyyaml
+# visualization 
+open3d==0.18.0
+opencv-python==4.8.0.76
+opencv-contrib-python==4.8.0.76
+opencv-python-headless==4.8.0.76

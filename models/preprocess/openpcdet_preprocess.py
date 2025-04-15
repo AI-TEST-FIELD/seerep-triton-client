@@ -1,4 +1,5 @@
 import yaml
+import os
 import numpy as np
 from easydict import EasyDict
 from .base_preprocess import Preprocess
@@ -7,7 +8,8 @@ from pcdet.datasets import processor
 class OpenPCDet_Preprocess(Preprocess):
 
     def __init__(self):
-        with open('/opt/client/config/kitti_dataset.yaml', 'r') as f:
+        config_path = os.path.join(os.environ['PROJECT_ROOT'], 'config', 'kitti_dataset.yaml')
+        with open(config_path, 'r') as f:
             self.dataset_cfg = EasyDict(yaml.safe_load(f))
         self.point_cloud_range = np.array(self.dataset_cfg.POINT_CLOUD_RANGE, dtype=np.float32)
         self.point_feature_encoder = processor.point_feature_encoder.PointFeatureEncoder(
