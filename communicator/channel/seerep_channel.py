@@ -397,7 +397,7 @@ class SEEREPChannel():
             if curr_sample==0:
                 break
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
-        data = self.run_query_tf(data)
+        data = self.run_query_tf(data, parent_frame='base_link')
         data = self.preprocess_pc(data)
         return data
     
@@ -517,14 +517,16 @@ class SEEREPChannel():
             header = createHeader(
                 builder=builder,
                 timeStamp=timestamp,
-                frame=sample['sensor_name'],
+                # frame=sample['sensor_name'],
+                frame=parent_frame,
                 projectUuid=self._projectid
             )
             if parent_frame in frames:
                 tf_query = createTransformStampedQuery(
                     builder=builder,
                     header=header,
-                    childFrameId=parent_frame,  # map_odom odom_base_link
+                    # childFrameId=parent_frame,  
+                    childFrameId=sample['sensor_name'],  # base_link
                 )
             else:
                 logger.error(f"Parent frame {parent_frame} not found in the following list of frames:")

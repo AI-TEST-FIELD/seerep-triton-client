@@ -231,7 +231,17 @@ class EvaluateInference(BaseInference):
             else:
                 return self.prediction
 
-    def seerep_infer_pc(self, sample: np.array):
+    def seerep_infer_pc(self, sample: np.array, 
+                        confidence_threshold=0.4, 
+                        class_idx=2, 
+                        visualize=False):
+        """
+        Perform inference on the point cloud data.
+        :param sample: Point cloud data
+        :param confidence_threshold: Confidence threshold for filtering predictions
+        :param class_idx: Class index for filtering predictions
+        :return: Filtered predictions
+        """
         self.pc = self.client_preprocess.filter_pc(sample)
         num_voxels = self.pc["voxels"].shape[0]
         self.channel.request.ClearField(
@@ -278,11 +288,12 @@ class EvaluateInference(BaseInference):
         box_array, scores, labels = self.client_postprocess.extract_boxes(
             self.channel.response
         )
+        
         # Show only persons above given confidence threshold
-        indices = np.where((labels == 2) & (scores > 0.4))[0].tolist()
+        indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
         # indices = [i for i in range(len(labels))]
 
-        if True:
+        if visualize:
             visualizer.draw_scenes(
                 points=self.pc["points"],
                 ref_boxes=box_array[indices, :],
@@ -397,40 +408,24 @@ class EvaluateInference(BaseInference):
             zip(data, range(len(data))),
             total=len(data),
             colour="GREEN",
-            # file=tqdm_out,
             desc="Sending inference request to Triton",
-            unit="request",
+            unit="request(s)",
         ):
             # perform an inference on each image, iteratively
             t3 = time.time()
+            # pc = np.zeros_like(sample["point_cloud_processed"])
+            # pc[:, 0] = sample["point_cloud"]["x"]["data"][:, 0]
+            # pc[:, 1] = sample["point_cloud"]["y"]["data"][:, 0]
+            # pc[:, 2] = sample["point_cloud"]["z"]["data"][:, 0]
+            # pc[:, 3] = sample["point_cloud"]["reflectivity"]["data"][:, 0]/255.0
             pred = self.seerep_infer_pc(sample["point_cloud_processed"])
+            # pred = self.seerep_infer_pc(pc)
             t4 = time.time()
             infer_array[idx] = t4 - t3
             # logger.info('Inference time: {}'.format(t4 - t3))
-            sample["predictions"] = []
-            bbs = []
-            labels = []
-            confidences = []
-            # traverse the predictions for the current pointclouds
-            # for obj in range(len(pred[1])):
-            #     pass
-            # if self.viz:
-            #     pass
-            # cv2.imwrite('./rainy/image_{}.png'.format(idx), cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR))
-            # TODO run evaluation without inference call
-            # schan.sendboundingbox(sample, bbs, labels, confidences, self.model_name+'2')
             # logger.info('Sent boxes for image under category name {}'.format(self.model_name))
-        # Convert groundtruth and predictions to PyCOCO format for evaluation
-        # logger.info('Average Inference time / image: {} s'.format(np.round(np.sum(infer_array)/len(infer_array), 3)))
-        # t5 = time.time()
-        # coco_data = COCO_SEEREP(seerep_data=data, format=self.format)
-        # cocoEval = COCOeval(coco_data.ground_truth, coco_data.predictions, 'bbox')
-        # cocoEval.evaluate()
-        # cocoEval.accumulate()
-        # cocoEval.summarize()
         # t6 = time.time()
-        # logger.info('Evaluation time: {} s'.format(np.round(t6 - t5, 3)))
-
+        
     def start_inference(self, model_name, format="coco"):
         schan = seerep_channel.SEEREPChannel(
             project_name=self.args.seerep_project,
