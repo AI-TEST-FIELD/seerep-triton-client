@@ -7,16 +7,13 @@ from communicator.channel import grpc_channel, seerep_channel
 from clients import Yolov5client, FCOS_client, Detrex_client, PCDet_client
 
 clients = {
-    'YOLOv5nCROP': Yolov5client,
-    'YOLOv5nCOCO': Yolov5client,
     'yolov5m_coco': Yolov5client,
-    'FCOS_detectron':FCOS_client,
-    'frcnn_800':FCOS_client,
+    'fcos_coco':FCOS_client,
+    'frcnn_800_coco':FCOS_client,
     'dino_coco_600_squared':Detrex_client,
     'dino_coco_800':Detrex_client,
     'retinanet_coco':FCOS_client,
-    'retina_big':FCOS_client,
-    'second_iou':PCDet_client,
+    'second_iou_kitti':PCDet_client,
     'pointpillar_kitti':PCDet_client,
     # more clients can be added
 }
@@ -49,7 +46,7 @@ def parse_args():
                         type=str,
                         required=False,
                         default="aitf-triton-data",
-                        choices=['yolov5m_coco', 'frcnn_800', 'dino_coco_600_squared', 'dino_coco_800','retina_big', 'second_iou', 'pointpillar_kitti'],
+                        choices=['yolov5m_coco', 'yolov5m_iso', 'frcnn_800_coco', 'retinanet_coco', 'second_iou_kitti', 'pointpillar_kitti'],
                         help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
     parser.add_argument('-x',
                         '--model-version',
