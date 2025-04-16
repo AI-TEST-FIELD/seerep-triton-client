@@ -1,55 +1,72 @@
-from logger import Client_logger, TqdmToLogger
-from tritonclient.grpc import service_pb2, service_pb2_grpc
-import tritonclient.grpc.model_config_pb2 as mc
-
-import os
 import sys
-import cv2
-import json
 import numpy as np
 import struct
-import flatbuffers
-import grpc
-import uuid
 import logging
-from tqdm import tqdm
+import yaml
+import grpc
+import open3d as o3d
+import flatbuffers
+import tritonclient.grpc.model_config_pb2 as mc
+from typing import List, Tuple, Set
+# import uuid
+import cv2
+import json
+# import os
+
+from tqdm.auto import tqdm
 from copy import copy
-from typing import Set, Tuple, List
 from scipy.spatial.transform import Rotation as R
+from grpc import Channel
 
 from seerep.fb import (
     Boundingbox,
     Empty,
+    FrameQuery,
     Header,
     Image,
     Point,
     ProjectInfos,
     Query,
+    StringVector,
     TimeInterval,
     Timestamp,
     TRANSMISSION_STATE,
     LabelCategory
 )
-from seerep.fb import PointCloud2 as pc2
-from seerep.fb import image_service_grpc_fb as imageService
-from seerep.fb import point_cloud_service_grpc_fb as pointCloudService
-from seerep.fb import meta_operations_grpc_fb as metaOperations
+
+from seerep.fb import (
+    PointCloud2 as pc2,
+    image_service_grpc_fb as imageService,
+    point_cloud_service_grpc_fb as pointCloudService,
+    meta_operations_grpc_fb as metaOperations,
+    tf_service_grpc_fb as tfService,
+    TransformStamped
+)
+
 from seerep.util import fb_helper as util_fb
+from seerep.util.common import get_gRPC_channel
 from seerep.fb.ServerResponse import ServerResponse
 from seerep.util.fb_helper import (
     create_dataset_uuid_label,
+    createHeader,
     create_label,
     create_label_category,
-    createEmpty,
     createTimeStamp,
+    createTransformStampedQuery,
     createTimeInterval,
     createQuery,
 )
+from tools.pointcloud import (
+    pcd_o3d_to_numpy,
+    pcd_ros_to_o3d,
+)
 # from visual_utils import open3d_vis_utils as visualizer
 from utils import cxcy2xyxy
+from logger import Client_logger, TqdmToLogger
 
-logger = Client_logger(name='SEEREP-Client', level=logging.ERROR).get_logger()
+logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger,level=logging.INFO)
+O3D_DEVICE = o3d.core.Device("CPU:0")  # can also be set to GPU
 
 class APIError(Exception):
     pass
@@ -76,7 +93,8 @@ class SeerepEndpoint:
     def __init__(self,
                  endpoint_url='agrigaia-ur.ni.dfki:9090',
                  modality='image',
-                 visualize=False):
+                 visualize=False,
+                 log_level='ERROR'):
         self._grpc_stub = None
         self._grpc_stubmeta = None
         self._builder = None
@@ -84,13 +102,14 @@ class SeerepEndpoint:
         self.visualize = visualize
 
         # register and initialise the stub
-        self.vis = visualize
         self.modality = modality
         self.intialize_gRPC_stubs()
+        
         # self.ann_dict = self.annotation_dict(format=format)
         if self.visualize:
             self.source_window = 'SEEREP source image'
             cv2.namedWindow(self.source_window)
+        logger.info("SEEREP Channel initialized successfully via endpoint : {} ".format(self.endpoint_url))
 
     def register_grpc_channel(self):
         """
@@ -107,10 +126,13 @@ class SeerepEndpoint:
          e.g. agrigaia-ur.ni.dfki:9090
         """
         grpc_channel = self.register_grpc_channel()
-        if self.modality == 'images':
+        if self.modality == 'image':
             self._grpc_stub  = imageService.ImageServiceStub(grpc_channel)
-        elif self.modality == 'pointclouds':
+        elif self.modality == 'pointcloud':
             self._grpc_stub  = pointCloudService.PointCloudServiceStub(grpc_channel)
+        else:
+            logger.error("Modality not supported. Please use image or pointcloud")
+            sys.exit(0)
         self._grpc_stubmeta = metaOperations.MetaOperationsStub(grpc_channel)
         self._builder = self.init_builder()
 
@@ -133,6 +155,15 @@ class SeerepEndpoint:
         return grpc stub
         """
         return self._grpc_stub
+    
+    def tf_channel(self):
+        """
+         Establish a channel for querying TFs
+        """
+        tf_stub  = tfService.TfServiceStub(self.channel)
+        builder = self.init_builder()
+
+        return (tf_stub, builder)
 
     def init_builder(self):
         """
@@ -220,7 +251,7 @@ class SeerepEndpoint:
         )
         self._builder.Finish(queryMsg)
         buffer = self._builder.Output()
-        return self.process_images(buffer, model_name=model_name)
+        return self.process_images(buffer, model_name=model_name, )
     
     def fetch_uuids_by_project_uuid(self, project_uuid: list[str])->list[str]:
         if isinstance(project_uuid, str):
@@ -295,7 +326,11 @@ class SeerepEndpoint:
         keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
         '''
         data = []
-        for responseBuf in tqdm(self._grpc_stub.GetImage(bytes(buffer)), desc="Fetching images", unit=" image(s)", colour="blue"):
+        if self.modality == 'image':
+            data_generator = self._grpc_stub.GetImage(bytes(buffer))
+        elif self.modality == 'pointcloud':
+            data_generator = self._grpc_stub.GetPointCloud2(bytes(buffer))
+        for responseBuf in tqdm(data_generator, desc="Fetching images", unit=" image(s)", colour="blue"):
             sample = {}
             response = Image.Image.GetRootAs(responseBuf)
             msguuid = response.Header().UuidMsgs().decode("utf-8")
@@ -347,12 +382,172 @@ class SeerepEndpoint:
         Returns a list of string containing the UUIDs of the data samples
         '''
         data = []
-        for responseBuf in tqdm(self._grpc_stub.GetImage(bytes(buffer)), desc="Fetching UUIDs", unit=" uuid(s)", colour="blue"):
+        if self.modality == 'image':
+            data_generator = self._grpc_stub.GetImage(bytes(buffer))
+        elif self.modality == 'pointcloud':
+            data_generator = self._grpc_stub.GetPointCloud2(bytes(buffer))
+        else:
+            logger.error("Modality not supported. Please use image or pointcloud")
+            sys.exit(0)
+        for responseBuf in tqdm(data_generator, desc="Fetching UUIDs", unit=" uuid(s)", colour="blue"):
             logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             sample_uuid = response.Header().UuidMsgs().decode("utf-8")
             data.append(sample_uuid)
         logger.info('Fetched {} UUIDs from the current SEEREP project'.format(len(data)))
+        return data
+    
+    def preprocess_pc(self, pointcloud_data: dict) -> dict:
+        """
+        Processing Steps:
+            1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
+            2. Translate Point Cloud into the Dataset specific detector training dataset frame. Adjusts the Point Cloud to mimic the relative Lidar position from the detectors training dataset.
+            3. Normalize feature field [0, 1], by maximal possible feature value (reflectance/intensity = 255).
+
+
+        Args:
+            sample : Dictionary containing the point cloud and sensor specific information.
+            sensor_name : Sensor specific name tag associated with the point cloud.
+            dataset_name : The name of the dataset used for training of the object detector.
+
+        Return:
+            preprocessed_np_pcd : Preprocessed point cloud as numpy array [[x, y, z, feature], ...]
+
+        """
+
+        # dictionary for sensor and dataset transformations
+        if 'kitti' in self.model_name:
+            dataset_translation = [0.0, 0.0, -1.026558971]
+        # TODO add nuscenes translation
+        elif 'nuscenes' in self.model_name: 
+            dataset_translation = [0.0, 0.0, -1.026558971]  
+        else:
+            logger.error(f"Dataset {self.model_name} not supported. Please use kitti or nuscenes.")
+            return None
+        for sample in tqdm(pointcloud_data,
+                                    desc='Transforming pointclouds',
+                                    unit="samples",
+                                    colour='YELLOW',
+                                    total=len(pointcloud_data)):
+            # check if the sample has a tf
+            if sample['transform_matrix'] is not None:
+                # get the transform matrix for the current pc sample
+                transform_matrix = np.array(sample['transform_matrix']).reshape(4, 4)
+            else:
+                logger.error(f"Sample {sample['uuid']} does not have a tf. Skipping...")
+                continue
+            
+            MAX_FEATURE_VALUE = 255
+            # sensor and data specific params
+            sensor_to_robot_base_transform = o3d.core.Tensor(
+                transform_matrix, device=O3D_DEVICE
+            )
+            robot_base_to_train_dataset_translation = o3d.core.Tensor(
+                dataset_translation, device=O3D_DEVICE
+            )
+            feature_field = sample['lidar_feature']
+
+            # preprocessing steps
+            raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=sample['point_cloud'], feature_field=feature_field)
+            preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
+            preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
+                robot_base_to_train_dataset_translation
+            )
+            preprocessed_np_pcd = pcd_o3d_to_numpy(
+                o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
+            )
+            preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
+            pointcloud_data[pointcloud_data.index(sample)]['point_cloud_processed'] = preprocessed_np_pcd
+            
+        return pointcloud_data
+    
+    def run_query_tf_frames(self, target_proj_uuid: str = None, grpc_channel: Channel = get_gRPC_channel()
+                            )-> dict:
+        """
+        Flat buffers based gRPC query for frames
+        Args:
+            target_proj_uuid: UUID of the project to query frames from
+            grpc_channel: gRPC channel to use for the query
+        Returns:
+            frame_dict: dictionary containing the frames
+        https://github.com/DFKI-NI/seerep/blob/main/examples/python/gRPC/tf/gRPC_pb_queryFrames.py
+        """
+        stub = tfService.TfServiceStub(grpc_channel)
+        builder = self.init_builder()
+        projectUuid = builder.CreateString(target_proj_uuid)
+        FrameQuery.Start(builder)
+        FrameQuery.AddProjectuuid(builder, projectUuid)
+        frameQuery = FrameQuery.End(builder)
+        builder.Finish(frameQuery)
+        buf = builder.Output()
+        
+        responseBuf = stub.GetFrames(bytes(buf))
+        response = StringVector.StringVector.GetRootAs(responseBuf)
+        for idx in range(response.StringVectorLength()):
+            frame_str = response.StringVector(idx).decode("utf-8")
+            try:
+                frame_dict = yaml.safe_load(frame_str)
+            except yaml.YAMLError as e:
+                logger.error(f"Error parsing frame string as YAML: {e}")
+        return frame_dict
+    
+    def run_query_tf(self, 
+                     data: list[dict],
+                     parent_frame: str='base_link',) -> list[dict]:
+        """
+        Query the TF for each pointcloud
+        Args:
+            data: list of dictionaries containing pointcloud data
+        Returns:
+            data: list of dictionaries containing pointcloud data with TFs
+        """
+        frames = self.run_query_tf_frames(self._projectid, self.channel)
+        tf_stub, builder = self.tf_channel()
+        for sample, index in tqdm(zip(data, range(len(data))),
+                            total=len(data),
+                            colour='BLUE',
+                            desc='Query TF for each pointcloud',
+                            unit=" samples"):
+            
+            timestamp = createTimeStamp(builder, sample['timestamp'][0], sample['timestamp'][1])    # [0] is seconds, [1] is nanoseconds
+            header = createHeader(
+                builder=builder,
+                timeStamp=timestamp,
+                # frame=sample['sensor_name'],
+                frame=parent_frame,
+                projectUuid=self._projectid
+            )
+            if parent_frame in frames:
+                tf_query = createTransformStampedQuery(
+                    builder=builder,
+                    header=header,
+                    # childFrameId=parent_frame,  
+                    childFrameId=sample['sensor_name'],  # base_link
+                )
+            else:
+                logger.error(f"Parent frame {parent_frame} not found in the following list of frames:")
+                logger.error(", \n".join(frames.keys()))
+            builder.Finish(tf_query)
+            tf_buf: bytearray = tf_stub.GetTransformStamped(bytes(builder.Output()))
+            try:
+                tf = TransformStamped.TransformStamped.GetRootAs(tf_buf)
+                x = tf.Transform().Translation().X()
+                y = tf.Transform().Translation().Y()
+                z = tf.Transform().Translation().Z()
+                qx = tf.Transform().Rotation().X()
+                qy = tf.Transform().Rotation().Y()
+                qz = tf.Transform().Rotation().Z()
+                qw = tf.Transform().Rotation().W()
+                quaternion = [qw, qx, qy, qz] # w, x, y, z
+                rotation_matrix = o3d.geometry.get_rotation_matrix_from_quaternion(quaternion)
+                # Combine translation and rotation into a 4x4 transformation matrix
+                transformation_matrix = np.eye(4)
+                transformation_matrix[:3, :3] = rotation_matrix
+                transformation_matrix[:3, 3] = [x, y, z]
+                data[index]['transform_matrix'] = transformation_matrix.tolist()
+            except Exception as e:
+                logger.error(f"Error querying TF for pointcloud {sample['uuid']}: {e}")
+                data[index]['tf'] = None
         return data
     
     # TODO run query will be deprecated. Out of date.
@@ -542,6 +737,7 @@ class SeerepEndpoint:
                         pass
         image_stub.AddLabels(iter(msgToSend))
         return label_list
+
 
 def main():
     model_name = 'retina_big'

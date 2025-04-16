@@ -1,7 +1,7 @@
 from .base_preprocess import Preprocess
 import numpy as np
 
-class Ultralytics_Preprocess(Preprocess):
+class Ultralytics_preprocess(Preprocess):
 
     def __init__(self):
         pass

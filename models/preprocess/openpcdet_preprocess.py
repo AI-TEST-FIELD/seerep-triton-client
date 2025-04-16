@@ -5,7 +5,7 @@ from easydict import EasyDict
 from .base_preprocess import Preprocess
 from pcdet.datasets import processor
 
-class OpenPCDet_Preprocess(Preprocess):
+class OpenPCDet_preprocess(Preprocess):
 
     def __init__(self):
         config_path = os.path.join(os.environ['PROJECT_ROOT'], 'config', 'kitti_dataset.yaml')

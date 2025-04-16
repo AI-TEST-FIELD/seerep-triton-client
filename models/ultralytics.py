@@ -1,6 +1,6 @@
 from .base_model import Model
-from .preprocess import Ultralytics_Preprocess
-from .postprocess import Ultralytics_Postprocess
+from .preprocess import Ultralytics_preprocess
+from .postprocess import Ultralytics_postprocess
 
 class Ultralytics(Model):
     """
@@ -17,7 +17,7 @@ class Ultralytics(Model):
         self._clients[clienttype] = client
 
     def get_preprocess(self):
-        return Ultralytics_Preprocess()
+        return Ultralytics_preprocess()
 
     def get_postprocess(self):
-        return Ultralytics_Postprocess()
+        return Ultralytics_postprocess()

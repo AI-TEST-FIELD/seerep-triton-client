@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 from .base_preprocess import Preprocess
 
-class Detrex_Preprocess(Preprocess):
+class Detrex_preprocess(Preprocess):
 
     def __init__(self):
         pass

@@ -7,7 +7,7 @@ import torch
 import torchvision
 from .base_postprocess import Postprocess
 
-class Ultralytics_Postprocess(Postprocess):
+class Ultralytics_postprocess(Postprocess):
 
     def __init__(self):
         pass

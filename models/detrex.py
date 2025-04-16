@@ -1,6 +1,6 @@
 from .base_model import Model
-from .preprocess import Detrex_Preprocess
-from .postprocess import Detrex_Postprocess
+from .preprocess import Detrex_preprocess
+from .postprocess import Detrex_postprocess
 
 class Detrex_Det(Model):
     """
@@ -17,7 +17,7 @@ class Detrex_Det(Model):
         self._clients[clienttype] = client
 
     def get_preprocess(self):
-        return Detrex_Preprocess()
+        return Detrex_preprocess()
 
     def get_postprocess(self):
-        return Detrex_Postprocess()
+        return Detrex_postprocess()

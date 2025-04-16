@@ -2,7 +2,7 @@ import sys
 import numpy as np
 from .base_postprocess import Postprocess
 
-class Detectron2_Postprocess(Postprocess):
+class Detectron2_postprocess(Postprocess):
     def __init__(self):
         pass
 

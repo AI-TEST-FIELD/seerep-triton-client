@@ -1,6 +1,6 @@
 from .base_model import Model
 from .preprocess import Detectron2_preprocess
-from .postprocess import Detectron2_Postprocess
+from .postprocess import Detectron2_postprocess
 
 class Detectron2_Det(Model):
     """
@@ -20,4 +20,4 @@ class Detectron2_Det(Model):
         return Detectron2_preprocess()
 
     def get_postprocess(self):
-        return Detectron2_Postprocess()
+        return Detectron2_postprocess()

@@ -2,7 +2,7 @@ import sys
 import numpy as np
 from .base_postprocess import Postprocess
 
-class Detrex_Postprocess(Postprocess):
+class Detrex_postprocess(Postprocess):
     def __init__(self):
         pass
 

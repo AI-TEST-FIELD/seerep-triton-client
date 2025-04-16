@@ -1,109 +1,15 @@
-#!/usr/bin/env python
-import argparse
+from triton import TritonInference
 
-from communicator import EvaluateInference
-from communicator.endpoint.triton_endpoint import TritonEndpoint
-from clients import Yolov5client, FCOS_client, Detrex_client
+image_uuids = ['1957e21a-2f4f-40f5-b4de-b0a693fd7bc0',
+               'f90f8e7c-1e08-4868-ad8d-a6f690ebca94']
 
-clients = {
-    'YOLOv5nCROP': Yolov5client,
-    'YOLOv5nCOCO': Yolov5client,
-    'yolov5m_coco': Yolov5client,
-    'yolov5m_iso_trt': Yolov5client,
-    'yolov5m_iso_onnx': Yolov5client,
-    'FCOS_detectron':FCOS_client,
-    'frcnn_800':FCOS_client,
-    'dino_coco_600_squared':Detrex_client,
-    'dino_coco_800':Detrex_client,
-    'dino_coco_600':Detrex_client,
-    'retinanet_coco':FCOS_client,
-    'retina_big':FCOS_client,
-    # 'second_iou':Pointpillars_client,
-    # more clients can be added
-}
+seerep_endpoint = "agrigaia-ur.ni.dfki:9090"
+triton_endpoint = "10.249.6.30:8001"
 
-
-FLAGS = None
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-cT',
-                        '--channel-triton',
-                        type=str,
-                        required=True,
-                        default="localhost:8001",
-                        help='gRPC endpoint of the Triton inference server')
-    parser.add_argument('-cS',
-                        '--channel-seerep',
-                        type=str,
-                        required=True,
-                        default="agrigaia-ur.ni.dfki:9090",
-                        help='gRPC endpoint of the SEEREP server')
-    parser.add_argument('-p',
-                        '--seerep-project',
-                        type=str,
-                        required=True,
-                        default="agrigaia-ur.ni.dfki:9090",
-                        help='Name of the SEEREP Project where the data is store e.g. "aitf-triton-data"')
-    parser.add_argument('-m',
-                        '--model-name',
-                        type=str,
-                        required=False,
-                        default="aitf-triton-data",
-                        help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
-    parser.add_argument('-x',
-                        '--model-version',
-                        type=str,
-                        required=False,
-                        default="",
-                        help='Version of model. Default is to use latest version.')
-    parser.add_argument('-l',
-                        '--log-level',
-                        type=str,
-                        required=False,
-                        default='error',
-                        choices=['info', 'warning', 'debug', "critical", "error"],
-                        help='Set logging level')
-    parser.add_argument('-b',
-                        '--batch-size',
-                        type=int,
-                        required=False,
-                        default=1,
-                        help='Batch size. Default is 1.')
-    parser.add_argument('-v',
-                        '--visualize',
-                        action='store_true',
-                        required=False,
-                        help='Visualize images'),
-    parser.add_argument('-d',
-                        '--mode',
-                        type=str,
-                        required=False,
-                        default='images',
-                        choices=['images', 'pointclouds'],
-                        help='Data modality on which we want to perform inference. Default is images.')
-    parser.add_argument('-s',
-                        '--semantics',
-                        nargs='+',
-                        required=False,
-                        help='Provide SEEREP semantics as a list e.g. "-s person weather_general_cloudy "')
-    return parser.parse_args()
-
-
-if __name__ == '__main__':
-    FLAGS = parse_args()
-    # select client operations based on the model
-    queries = [query.lower() for query in FLAGS.semantics]
-    if len([v for v in queries if 'kitti' in v]) != 0:
-        format='kitti'
-    else:
-        format='coco'
-    format='aitf'
-    client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
-
-    #define channel
-    triton_grpc_stub = TritonEndpoint(FLAGS)
-
-    #define inference
-    evaluation = EvaluateInference(args=FLAGS, triton_stub=triton_grpc_stub, client=client, format=format)
-    evaluation.start_inference(model_name=FLAGS.model_name, modality=FLAGS.mode)
+triton_client  = TritonInference(
+                                model_name='yolov5m_coco',
+                                seerep_endpoint_url=seerep_endpoint,
+                                triton_endpoint_url=triton_endpoint,
+                                log_level='info',
+                                modality='image')
+triton_client.generate_annotations(sample_uuids=image_uuids)

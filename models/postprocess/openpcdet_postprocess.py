@@ -2,7 +2,7 @@ import numpy as np
 import os
 from .base_postprocess import Postprocess
 
-class OpenPCDet_Postprocess(Postprocess):
+class OpenPCDet_postprocess(Postprocess):
     def __init__(self):
         self.config_path = os.path.join(os.environ['PROJECT_ROOT'], 'config', 'kitti.names')
 

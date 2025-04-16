@@ -1,6 +1,6 @@
 from .base_model import Model
-from .preprocess import OpenPCDet_Preprocess
-from .postprocess import OpenPCDet_Postprocess
+from .preprocess import OpenPCDet_preprocess
+from .postprocess import OpenPCDet_postprocess
 
 class OpenPCDet(Model):
     """
@@ -17,10 +17,10 @@ class OpenPCDet(Model):
         self._clients[clienttype] = client
 
     def get_preprocess(self):
-        return OpenPCDet_Preprocess()
+        return OpenPCDet_preprocess()
 
     def get_postprocess(self):
-        return OpenPCDet_Postprocess()
+        return OpenPCDet_postprocess()
 
     # Override function from the base class.
     def parse_model(self, model_metadata, model_config):
