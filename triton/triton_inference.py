@@ -78,6 +78,13 @@ class TritonInference:
         else:
             logger.error(f"Unsupported modality: {self.modality} \n Supported modalities are case-sensitive: image, pointcloud")
             sys.exit(1)
+        if self.model_name not in self.models_database.keys():
+            logger.error(
+                f"Model {self.model_name} not found in the models database for {self.modality} modality.\n"
+                f"Supported models are: {list(self.models_database.keys())}" 
+            )
+            sys.exit(1)
+        f"Supported models are: {self.models_database.keys()}"
         self.model = self.models_database.get(self.model_name)(model_name=self.model_name)
         self.model_preprocess = self.model.get_preprocess()
         self.model_postprocess = self.model.get_postprocess()
@@ -437,6 +444,9 @@ class TritonInference:
         """
         data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_name)
         data = self.generate_datumaro_predictions(data)
+        data = self.seerep_endpoint.send_dataset(uuids=sample_uuids,
+                                                data=data,
+                                                category=self.model_name)
         return data
     
     def get_project_uuid(self, project_name: str)->str:

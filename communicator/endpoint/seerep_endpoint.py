@@ -691,12 +691,6 @@ class SeerepEndpoint:
             sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
             sample['processed'] = False
             sample['no_grountruth'] = False
-            # tmp = sample['image']
-            # if sample['image'].shape[2] == 4:
-            #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_A2BGR)
-            #     # tmp = tmp[:, :, 0:3]    # ignore last channel for visualization
-            # elif sample['image'].shape[2] == 3:
-            #     tmp = cv2.cvtColor(sample['image'], cv2.COLOR_RGB2BGR)
             sample['annotations'] = {
                 "info": {},
                 "categories": {
@@ -722,31 +716,6 @@ class SeerepEndpoint:
                                 category_with_labels.Labels(j).LabelIdDatumaro(),
                             )
                         )
-                # For DEBUG
-            #     if self.vis and len(sample['annotations']['items'][0]['annotations']) != 0:
-            #         for ann_idx, ann in enumerate(sample['annotations']['items'][0]['annotations']):
-            #             bbox = sample['annotations']['items'][0]['annotations'][ann_idx]['bbox']
-            #             bbox = cxcy2xyxy(bbox)
-            #             label = int(sample['annotations']["items"][0]['annotations'][ann_idx]['id'])
-            #             cv2.rectangle(tmp,
-            #                             (bbox[0], bbox[1]),
-            #                             (bbox[2], bbox[3]),
-            #                             (255, 0, 0), 2)
-            #             (tw, th), _ = cv2.getTextSize(self.ann_dict[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-            #             cv2.rectangle(tmp,
-            #                             (bbox[0], bbox[1] - 25),
-            #                             (bbox[0] + tw, bbox[1]),
-            #                             (255, 0, 0), -1)
-            #             cv2.putText(tmp,
-            #                         self.ann_dict[label],
-            #                         (bbox[0], bbox[1] - 5),
-            #                         cv2.FONT_HERSHEY_SIMPLEX,
-            #                         0.9, (255,255,255), 2)
-            # if self.vis:
-            #     cv2.imshow(self.source_window, tmp)
-            #     cv2.waitKey(0)
-            #     tmp = None
-            # This condition makes sure we do not predict the labels twice and send them back again to SEEREP
             if model_name in sample['annotations']['categories']['label']['labels']:
                 sample['processed']  = True
             if len(sample['annotations']['items'][0]['annotations']) == 0:
@@ -758,27 +727,22 @@ class SeerepEndpoint:
         return data
     
     # TODO Send dataset should also be on project or data UUID basis. Out of date.
-    def send_dataset(self, data, category):
+    def send_dataset(self, data: list[dict], uuids: list[str], category: str='yolov5m_coco'):
         """
-            Send a Datumaro dataset to SEEREP.
+            Send the previously fetched SEEREP dataset augmented with Datumaro annotations
+            using model from triton server under the name category
 
             Args:
-                project_name (str): Name for the SEEREP project to create from the dataset.
-                dataset_path (str, optional): Path to the Datumaro dataset base directory \
-                    (one level up from the 'images' directory). Defaults to the current directory.
-
+                data (list[dict]): List of dictionaries containing the data samples with ['annotations']
+                uuids (list[str]): List of UUIDs of the data samples
+                category (str): The name of the model used for predictions
             Returns:
                 str: The UUID of the created SEEREP project.
-
-            Raises:
-                FileNotFoundError: If the Datumaro dataset base directory does not exist.
-                APIError: If there is an error sending the dataset.
-
             """
-        image_stub, grpc_stubmeta, builder, projectid = self.secondary_channel()
+        image_stub, _, builder = self.secondary_channel()
         query = util_fb.createQuery(
                             builder,
-                            projectUuids=[projectid],
+                            dataUuids=uuids,
                             # timeInterval=timeInterval,
                             withoutData=True,
                         )
@@ -797,8 +761,8 @@ class SeerepEndpoint:
                                 total=len(data),
                                 colour="GREEN",
                                 desc="Sending Predictions to SEEREP Server:",
-                                unit="predictions",
-                                ascii=True):
+                                unit="predictions"
+                                ):
 
             response = Image.Image.GetRootAs(responseBuf)
             img_uuid = response.Header().UuidMsgs().decode("utf-8")
@@ -820,9 +784,6 @@ class SeerepEndpoint:
                         for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
                             labels.append(create_label(builder=builder,
                                                         label='person',
-
-
-
                                                         label_id=int(prediction['label_id']),
                                                         instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
                                                         instance_id=int(prediction['id'])
