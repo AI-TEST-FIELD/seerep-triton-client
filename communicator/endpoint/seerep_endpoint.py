@@ -330,7 +330,7 @@ class SeerepEndpoint:
             data_generator = self._grpc_stub.GetImage(bytes(buffer))
         elif self.modality == 'pointcloud':
             data_generator = self._grpc_stub.GetPointCloud2(bytes(buffer))
-        for responseBuf in tqdm(data_generator, desc="Fetching images", unit=" image(s)", colour="blue"):
+        for responseBuf in tqdm(data_generator, desc="Fetching images", unit=" image(s)", colour="blue", disable=False):
             sample = {}
             response = Image.Image.GetRootAs(responseBuf)
             msguuid = response.Header().UuidMsgs().decode("utf-8")
@@ -390,7 +390,6 @@ class SeerepEndpoint:
             logger.error("Modality not supported. Please use image or pointcloud")
             sys.exit(0)
         for responseBuf in tqdm(data_generator, desc="Fetching UUIDs", unit=" uuid(s)", colour="blue"):
-            logger.info('Receiving messages from the SEEREP server')
             response = Image.Image.GetRootAs(responseBuf)
             sample_uuid = response.Header().UuidMsgs().decode("utf-8")
             data.append(sample_uuid)

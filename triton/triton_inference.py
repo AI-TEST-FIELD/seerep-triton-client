@@ -25,6 +25,7 @@ class TritonInference:
                  seerep_endpoint_url='agrigaia-ur.ni.dfki:9090', 
                  triton_endpoint_url='10.249.6.23:8001', 
                  log_level='error',
+                 visualize=False,
                  modality='image'):
         self.model_name = model_name
         self.seerep_endpoint = SeerepEndpoint(
@@ -41,7 +42,7 @@ class TritonInference:
         
         self.modality = modality
         self.log_level = log_level
-        self.visualize = False
+        self.visualize = visualize
         self._initialize_models()
         self._initialize_misc()
         logging.basicConfig(level=self.log_level[log_level])
@@ -234,7 +235,7 @@ class TritonInference:
             # assign the gathered model outputs to the grpc channel
             self.triton_endpoint.request.outputs.extend([self.outputs["output_{}".format(i)]])
 
-    def triton_infer_image(self, cv_image, filter_class_idx=0):
+    def triton_infer_image(self, cv_image, filter_class_idx=0)->list[np.ndarray]:
         """
         Perform inference on a single image via the Triton server gRPC endpoint.
         By default, the image is resized to the model input size.
@@ -244,7 +245,7 @@ class TritonInference:
         Args:
             cv_image (numpy.ndarray): Input image in BGR format.
         Returns:
-            tuple: A tuple containing the bounding boxes, class IDs, and confidence scores.
+            A list of numpy arrays containing the bounding boxes (tlbr xyxy), class IDs, and scores.
         """
         self.orig_image = cv_image.copy()
         original_h, original_w = cv_image.shape[0], cv_image.shape[1]
@@ -340,7 +341,14 @@ class TritonInference:
     #             ref_labels=labels[indices],
     #         )
     
-    def postprocess_seerep_data(self, data):
+    def generate_datumaro_predictions(self, data: list[dict])->list[dict]:
+        """
+        Iterates through the data samples and performs inference on each image sample.
+        Adds the predictions to the individual sample as data[sample_idx]['annotations'] in datumaro format.
+        Args:
+            data (list): List of data samples from SEEREP.
+        
+        """
         t2 = time.time()
         if len(data) == 0:
             logger.critical(
@@ -394,14 +402,49 @@ class TritonInference:
             # logger.info('{} image had no ground truth associated with them.'.format(self.no_gt_counter))
         return data
              
-    def generate_annotations(self, sample_uuids: list):
-        project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
-        data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
-                                                    model_name=self.model_name)
-        # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
-        uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid([project_uuid])
+    def generate_annotations_by_sample_uuids(self, sample_uuids: list)->list[dict]:
+        """
+        Generate annotations for the given sample UUIDs using the Triton inference model.
+        Args:
+            sample_uuids (list): List of sample UUIDs to generate annotations for.
+        Returns:
+        """
+        # project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
+        # data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
+        #                                             model_name=self.model_name)
+        # # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
+        # uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid([project_uuid])
         data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_name)
-        data = self.postprocess_seerep_data(data)
+        data = self.generate_datumaro_predictions(data)
+        
+        return data
+    
+    def get_project_uuid(self, project_name: str)->str:
+        """
+        Get the project UUID for the given project name.
+        Args:
+            project_name (str): Name of the project.
+        Returns:
+            str: Project UUID.
+        """
+        return self.seerep_endpoint.get_project_uuid(project_name)
+    
+    def generate_annotations_by_project_uuids(self, project_uuids: list)->list[dict]:
+        """
+        Generate annotations for the given sample UUIDs using the Triton inference model.
+        Args:
+            sample_uuids (list): List of sample UUIDs to generate annotations for.
+        Returns:
+        """
+        # project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
+        # data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
+        #                                             model_name=self.model_name)
+        # # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
+        sample_uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid(project_uuids)
+        data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_name)
+        data = self.generate_datumaro_predictions(data)
+
+        return data
 
     def get_image(self, sample_uuids):
         pass
