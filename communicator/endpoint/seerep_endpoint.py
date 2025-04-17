@@ -60,6 +60,7 @@ from tools.pointcloud import (
     pcd_o3d_to_numpy,
     pcd_ros_to_o3d,
 )
+from visual_utils import Visualizer
 # from visual_utils import open3d_vis_utils as visualizer
 from utils import cxcy2xyxy
 from logger import Client_logger, TqdmToLogger
@@ -125,15 +126,15 @@ class SeerepEndpoint:
          endpoint_url: String or IP address and PORT of the SEEREP server
          e.g. agrigaia-ur.ni.dfki:9090
         """
-        grpc_channel = self.register_grpc_channel()
+        self.grpc_channel = self.register_grpc_channel()
         if self.modality == 'image':
-            self._grpc_stub  = imageService.ImageServiceStub(grpc_channel)
+            self._grpc_stub  = imageService.ImageServiceStub(self.grpc_channel)
         elif self.modality == 'pointcloud':
-            self._grpc_stub  = pointCloudService.PointCloudServiceStub(grpc_channel)
+            self._grpc_stub  = pointCloudService.PointCloudServiceStub(self.grpc_channel)
         else:
             logger.error("Modality not supported. Please use image or pointcloud")
             sys.exit(0)
-        self._grpc_stubmeta = metaOperations.MetaOperationsStub(grpc_channel)
+        self._grpc_stubmeta = metaOperations.MetaOperationsStub(self.grpc_channel)
         self._builder = self.init_builder()
 
     def secondary_channel(self):
@@ -251,7 +252,115 @@ class SeerepEndpoint:
         )
         self._builder.Finish(queryMsg)
         buffer = self._builder.Output()
-        return self.process_images(buffer, model_name=model_name, )
+        if self.modality == 'image':
+            return self.process_images(buffer, model_name=model_name, num_samples=len(data_uuids))
+        elif self.modality == 'pointcloud':
+            return self.process_pointclouds(buffer, model_name=model_name, num_samples=len(data_uuids))
+        else:
+            logger.error("Modality not supported. Please use image or pointcloud")
+            sys.exit(0)
+            
+    def process_pointclouds(self, buffer, model_name, num_samples:int=10)->dict:
+        '''
+        buffer: flatbuffer buffer containing the query message 
+        generated using the SEEREP createQuery function
+        model_name: name of the model for which the predictions are to be generated.
+        Returns a list of dictionaries containing the data samples with the following keys:
+        - 'uuid': Unique identifier for the point cloud sample.
+        - 'sensor_name': Name of the sensor that captured the point cloud.
+        - 'timestamp': Timestamp of the point cloud sample as a tuple (seconds, nanoseconds).
+        - 'point_cloud': Dictionary containing the fields of the point cloud (e.g., x, y, z, intensity, etc.).
+        - 'lidar_feature': The feature field used for the point cloud (e.g., 'reflectivity' or 'intensity').
+        '''
+        data = []
+        sample = {}
+        data_generator = self._grpc_stub.GetPointCloud2(bytes(buffer))
+        for responseBuf, curr_sample in tqdm(zip(data_generator, range(num_samples)),
+                        total=num_samples,
+                        colour='GREEN',
+                        desc='Receiving pointclouds from the SEEREP server',
+                        unit=" samples"):
+            response = pc2.PointCloud2.GetRootAs(responseBuf)
+            msguuid = response.Header().UuidMsgs().decode("utf-8")
+            projuuid= response.Header().UuidProject().decode("utf-8")
+            timestamp = response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()
+            height = response.Width()
+            width = response.Height()
+            sample['uuid'] = msguuid
+            sample['project_uuid'] = projuuid
+            sample['sensor_name'] = response.Header().FrameId().decode("utf-8")
+            sample['timestamp'] = timestamp
+            raw_data = response.DataAsNumpy()
+            fields = {}
+            dtype = None
+            for j in range(response.FieldsLength()):
+                fields[response.Fields(j).Name().decode('utf-8')] = {}
+                fields[response.Fields(j).Name().decode('utf-8')]['offset'] = response.Fields(j).Offset()
+                fields[response.Fields(j).Name().decode('utf-8')]['dtype'] = response.Fields(j).Datatype()
+                dtype = Point_Field_Datatype[response.Fields(j).Datatype()]
+                try:
+                    # Use the lookup function to get the struct format character
+                    c = self.get_data_type_character(np.dtype(dtype).type)
+                except ValueError as e:
+                    logger.error(e)
+                    continue
+                fields[response.Fields(j).Name().decode('utf-8')]['data_string'] = c
+                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c) 
+            for field in fields:
+                strs = list()
+                for i in range(fields[field]['offset'], raw_data.shape[0], response.PointStep()):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
+                    sb = struct.unpack(fields[field]['data_string'], raw_data[i : i + fields[field]['size']])
+                    strs.append(sb)
+                fields[field]['data'] = (np.array(strs, dtype=np.object_))
+                strs = []
+            sample['point_cloud'] = copy(fields) 
+            if 'reflectivity' in fields:
+                sample['lidar_feature'] = 'reflectivity'
+            else:
+                sample['lidar_feature'] = 'intensity'
+            if self.visualize:
+                pc = np.zeros((height*width, 3), dtype=np.float64)
+                pc[:, 0] = fields['x']['data'][:, 0]
+                pc[:, 1] = fields['y']['data'][:, 0]
+                pc[:, 2] = fields['z']['data'][:, 0]
+                Visualizer.draw_scenes(pc)
+            # Store the sample into data collection
+            data.append(sample)
+            # flush the sample data for new incoming samples
+            sample={}    
+        logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
+        # TODO Does the parent frame change a lot to be dynamic? 
+        data = self.run_query_tf(data, parent_frame='base_link')
+        data = self.preprocess_pc(data)
+        return data
+    
+    @staticmethod
+    def get_data_type_character(dtype):
+        """
+        # https://docs.python.org/2/library/struct.html          
+        Returns the struct format character for a given numpy data type using a lookup table.
+        Args:
+            dtype: Numpy data type (e.g., np.int16, np.uint16, etc.)
+        Returns:
+            A string representing the struct format character (e.g., 'h', 'H', etc.)
+        """
+        # Lookup table for data type to struct format character
+        dtype_lookup = {
+            np.int16: 'h',     # 16-bit short
+            np.uint16: 'H',    # 16-bit unsigned short
+            np.int32: 'i',     # 32-bit int
+            np.uint32: 'I',    # 32-bit unsigned int
+            np.float32: 'f',   # 32-bit float
+            np.float64: 'd',   # 64-bit double
+        }
+
+        # Get the struct format character from the lookup table
+        c = dtype_lookup.get(dtype, None)
+
+        if c is None:
+            raise ValueError(f"Invalid data type: {dtype}")
+
+        return c
     
     def fetch_uuids_by_project_uuid(self, project_uuid: list[str])->list[str]:
         if isinstance(project_uuid, str):
@@ -317,7 +426,7 @@ class SeerepEndpoint:
 
         return anns_dict
 
-    def process_images(self, buffer, model_name)->dict:
+    def process_images(self, buffer, model_name, num_samples:int=10)->dict:
         '''
         buffer: flatbuffer buffer containing the query message 
         generated using the SEEREP createQuery function
@@ -326,11 +435,12 @@ class SeerepEndpoint:
         keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
         '''
         data = []
-        if self.modality == 'image':
-            data_generator = self._grpc_stub.GetImage(bytes(buffer))
-        elif self.modality == 'pointcloud':
-            data_generator = self._grpc_stub.GetPointCloud2(bytes(buffer))
-        for responseBuf in tqdm(data_generator, desc="Fetching images", unit=" image(s)", colour="blue", disable=False):
+        data_generator = self._grpc_stub.GetImage(bytes(buffer))
+        for responseBuf in tqdm(data_generator,
+                                total=num_samples, 
+                                desc="Fetching images from the SEEREP server",
+                                colour="blue", 
+                                unit=" image(s)"):
             sample = {}
             response = Image.Image.GetRootAs(responseBuf)
             msguuid = response.Header().UuidMsgs().decode("utf-8")
@@ -384,13 +494,15 @@ class SeerepEndpoint:
         data = []
         if self.modality == 'image':
             data_generator = self._grpc_stub.GetImage(bytes(buffer))
+            response_generator =  Image.Image.GetRootAs
         elif self.modality == 'pointcloud':
             data_generator = self._grpc_stub.GetPointCloud2(bytes(buffer))
+            response_generator =  pc2.PointCloud2.GetRootAs
         else:
             logger.error("Modality not supported. Please use image or pointcloud")
             sys.exit(0)
         for responseBuf in tqdm(data_generator, desc="Fetching UUIDs", unit=" uuid(s)", colour="blue"):
-            response = Image.Image.GetRootAs(responseBuf)
+            response = response_generator(responseBuf)
             sample_uuid = response.Header().UuidMsgs().decode("utf-8")
             data.append(sample_uuid)
         logger.info('Fetched {} UUIDs from the current SEEREP project'.format(len(data)))
@@ -500,7 +612,7 @@ class SeerepEndpoint:
         Returns:
             data: list of dictionaries containing pointcloud data with TFs
         """
-        frames = self.run_query_tf_frames(self._projectid, self.channel)
+        frames = self.run_query_tf_frames(data[0]['project_uuid'], self.grpc_channel)
         tf_stub, builder = self.tf_channel()
         for sample, index in tqdm(zip(data, range(len(data))),
                             total=len(data),
@@ -512,15 +624,13 @@ class SeerepEndpoint:
             header = createHeader(
                 builder=builder,
                 timeStamp=timestamp,
-                # frame=sample['sensor_name'],
                 frame=parent_frame,
                 projectUuid=self._projectid
             )
             if parent_frame in frames:
                 tf_query = createTransformStampedQuery(
                     builder=builder,
-                    header=header,
-                    # childFrameId=parent_frame,  
+                    header=header,  
                     childFrameId=sample['sensor_name'],  # base_link
                 )
             else:

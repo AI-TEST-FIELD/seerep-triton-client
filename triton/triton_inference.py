@@ -67,7 +67,7 @@ class TritonInference:
         elif self.modality == 'pointcloud':
             try:
                 from models import OpenPCDet
-                models_database = {
+                self.models_database = {
                     'second_iou_kitti':OpenPCDet,
                     'pointpillar_kitti':OpenPCDet,
                     # more clients can be added
@@ -235,6 +235,7 @@ class TritonInference:
             # assign the gathered model outputs to the grpc channel
             self.triton_endpoint.request.outputs.extend([self.outputs["output_{}".format(i)]])
 
+    # TODO add dynamic confidence value and 
     def triton_infer_image(self, cv_image, filter_class_idx=0)->list[np.ndarray]:
         """
         Perform inference on a single image via the Triton server gRPC endpoint.
@@ -290,56 +291,72 @@ class TritonInference:
                     return self.prediction
             else:
                 return self.prediction
-            
-    def visualize_img(self, 
-                      cv_image, 
-                      boxes:list,
-                      mode='BGR', 
-                      window='Triton Inference',
-                      class_idx=0,
-                      ):
+    
+    def triton_infer_pointcloud(self, pointcloud:np.ndarray, filter_class_idx=2, confidence=0.4)->list[np.ndarray]:
         """
-        Visualize the image with bounding boxes and labels.
-        Args:
-            cv_image (numpy.ndarray): Input image in BGR format.
-            mode (str): Color mode for visualization. Default is 'BGR'.
-            boxes (list): List of bounding boxes to visualize in topleft-bottom right xyxy format.
-            cv_window (str): Window name for OpenCV display.
+        Perform inference on the point cloud data.
+        :param sample: Point cloud data
+        :param confidence_threshold: Confidence threshold for filtering predictions
+        :param class_idx: Class index for filtering predictions
+        :return: Filtered predictions
         """
-        if mode == 'RGB':
-            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR).astype(np.uint8)
+        self.pc = self.client_preprocess.filter_pc(pointcloud)
+        num_voxels = self.pc["voxels"].shape[0]
+        self.channel.request.ClearField(
+            "raw_input_contents"
+        )  # Flush the previous sample content
+        for key, idx in zip(self.inputs, range(len(self.inputs))):
+            tmp_shape = self.inputs[key].shape
+            self.inputs[key].ClearField("shape")
+            tmp_shape[0] = num_voxels
+            self.channel.request.inputs[idx].ClearField("shape")
+            self.channel.request.inputs[idx].shape.extend(tmp_shape)
+            self.inputs[key].shape.extend(tmp_shape)
+        # Insert batch dimensions into the voxel coordinates------>change from N x 3 to N x 3+1. Assume batch size 1
+        tmp_data = np.zeros(
+            (self.pc["voxel_coords"].shape[0], self.pc["voxel_coords"].shape[1] + 1),
+            dtype=self.pc["voxel_coords"].dtype,
+        )
+        tmp_data[:, 1:] = self.pc["voxel_coords"].copy()
+        self.pc["voxel_coords"] = tmp_data.copy()
+        del tmp_data
+        # Make sure the data types and shapes are correct for each input before sending them as bytes, this causes wrong array values on the server
+        assert (
+            self.pc["voxels"].dtype
+            == self.input_datatypes[self.inputs["input_0"].datatype]
+        )
+        assert (
+            self.pc["voxel_coords"].dtype
+            == self.input_datatypes[self.inputs["input_1"].datatype]
+        )
+        assert (
+            self.pc["voxel_num_points"].dtype
+            == self.input_datatypes[self.inputs["input_2"].datatype]
+        )
+        self.channel.request.raw_input_contents.extend(
+            [
+                self.pc["voxels"].tobytes(),
+                self.pc["voxel_coords"].tobytes(),
+                self.pc["voxel_num_points"].tobytes(),
+            ]
+        )
+        self.channel.response = (
+            self.channel.do_inference()
+        )  # perform the channel Inference
+        box_array, scores, labels = self.client_postprocess.extract_boxes(
+            self.channel.response
+        )
+        
+        # Show only persons above given confidence threshold
+        indices = np.where((labels == filter_class_idx) & (scores > confidence))[0].tolist()
+
         if self.visualize:
-            for box in boxes:
-                cv2.rectangle(
-                    cv_image,
-                    (int(box[0]), int(box[1])),
-                    (int(box[2]), int(box[3])),
-                    (255, 0, 0),
-                    2,
-                )
-            named_window = window
-            cv2.imshow(named_window, cv_image)
-            cv2.waitKey(0)
-            cv2.destroyWindow(named_window)
-            
-    # def visualize_pointcloud(self,
-    #                         pointcloud:np.ndarray, 
-    #                         boxes:list,
-    #                         mode='BGR', 
-    #                         window='Triton Inference',
-    #                         class_idx=2,
-    #                         ):
-    #     """
-        
-    #     """
-    #     indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
-        
-    #     visualizer.draw_scenes(
-    #             points=pointcloud,
-    #             ref_boxes=box_array[indices, :],
-    #             ref_scores=scores[indices],
-    #             ref_labels=labels[indices],
-    #         )
+            Visualizer.draw_scenes(
+                points=self.pc["points"],
+                ref_boxes=box_array[indices, :],
+                ref_scores=scores[indices],
+                ref_labels=labels[indices],
+            )
     
     def generate_datumaro_predictions(self, data: list[dict])->list[dict]:
         """
@@ -349,6 +366,15 @@ class TritonInference:
             data (list): List of data samples from SEEREP.
         
         """
+        if self.modality == 'image':
+            data_key = 'image'
+            infer_function = self.triton_infer_image  
+        elif self.modality == 'pointcloud':
+            data_key = 'pointcloud'
+            infer_function = self.triton_infer_pointcloud
+        else:
+            logger.error("Unsupported modality: {}".format(self.modality))
+            sys.exit(1)
         t2 = time.time()
         if len(data) == 0:
             logger.critical(
@@ -375,7 +401,7 @@ class TritonInference:
                     }
                     # perform inference on each image, iteratively
                     t3 = time.time()
-                    pred = self.triton_infer_image(sample["image"])
+                    pred = infer_function(sample[data_key])
                     t4 = time.time()
                     infer_array[seerep_sample_idx] = t4 - t3
                     # traverse the predictions for the current image
@@ -409,14 +435,8 @@ class TritonInference:
             sample_uuids (list): List of sample UUIDs to generate annotations for.
         Returns:
         """
-        # project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
-        # data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
-        #                                             model_name=self.model_name)
-        # # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
-        # uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid([project_uuid])
         data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_name)
         data = self.generate_datumaro_predictions(data)
-        
         return data
     
     def get_project_uuid(self, project_name: str)->str:
@@ -445,9 +465,4 @@ class TritonInference:
         data = self.generate_datumaro_predictions(data)
 
         return data
-
-    def get_image(self, sample_uuids):
-        pass
-    
-
     
