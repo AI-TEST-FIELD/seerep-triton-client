@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-
 import argparse
 
 from communicator import EvaluateInference
 from communicator.endpoint.triton_endpoint import TritonEndpoint
 from models import Ultralytics, Detectron2_Det, Detrex_Det
-from models import OpenPCDet
+
 clients = {
-    'second_iou_kitti':OpenPCDet,
-    'pointpillar_kitti':OpenPCDet,
-    # more clients can be added
+    'yolov5m_coco': Ultralytics,
+    'yolov5m_iso': Ultralytics,
+    'fcos_coco':Detectron2_Det,
+    'frcnn_800_coco':Detectron2_Det,
+    'retinanet_coco':Detectron2_Det,
 }
 
 
@@ -40,7 +41,6 @@ def parse_args():
                         type=str,
                         required=False,
                         default="aitf-triton-data",
-                        choices=['yolov5m_coco', 'yolov5m_iso', 'frcnn_800_coco', 'retinanet_coco', 'second_iou_kitti', 'pointpillar_kitti'],
                         help='Name of the model. This has to match exactly (also case sensitive) with name string on Triton server')
     parser.add_argument('-x',
                         '--model-version',
@@ -65,7 +65,14 @@ def parse_args():
                         '--visualize',
                         action='store_true',
                         required=False,
-                        help='Visualize images')
+                        help='Visualize images'),
+    parser.add_argument('-d',
+                        '--mode',
+                        type=str,
+                        required=False,
+                        default='images',
+                        choices=['images', 'pointclouds'],
+                        help='Data modality on which we want to perform inference. Default is images.')
     parser.add_argument('-s',
                         '--semantics',
                         nargs='+',
@@ -82,11 +89,12 @@ if __name__ == '__main__':
         format='kitti'
     else:
         format='coco'
-    
+    format='aitf'
     client = clients[FLAGS.model_name](model_name=FLAGS.model_name)
+
     #define channel
     triton_grpc_stub = TritonEndpoint(FLAGS)
 
     #define inference
     evaluation = EvaluateInference(triton_stub=triton_grpc_stub, model=client, visualize=FLAGS.visualize,)
-    evaluation.start_inference(FLAGS.model_name, modality='pointclouds')
+    evaluation.start_inference(model_name=FLAGS.model_name, modality=FLAGS.mode)
