@@ -7,6 +7,8 @@ import logging
 from tqdm import tqdm
 from tritonclient.grpc import service_pb2
 from communicator.endpoint import SeerepEndpoint, TritonEndpoint
+from models.base_model import Model
+# from models.postprocess import Postprocess
 from logger import Client_logger, TqdmToLogger
 from visual_utils import Visualizer
 from utils import (
@@ -19,30 +21,98 @@ from utils import (
 logger = Client_logger(name="Triton-Inference", level=logging.INFO).get_logger()
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
 
+class ModelData:
+    def __init__(self, model, model_preprocess, model_postprocess):
+        self.model = model
+        self.model_preprocess = model_preprocess
+        self.model_postprocess = model_postprocess
+        self.model_name = model.model_name
+        
+    def init_endpoint(self, endpoint_url: str, log_level: str="info"):
+        """
+        Initialize the Triton endpoint for the model.
+        Args:
+            endpoint_url (str): URL of the Triton server.
+            log_level (str): Logging level for the Triton client.
+        """
+        self.endpoint = TritonEndpoint(
+            model_name=self.model_name,
+            endpoint_url=endpoint_url,
+            log_level=log_level,
+        )
+        self._init_model_io()
+        self.class_names = None
+        if "COCO" or "coco" in self.model_name:
+            self.class_names = self.model_postprocess.load_class_names(dataset="COCO")
+            self.format = "coco"
+        elif "CROP" in self.model_name:
+            self.class_names = self.model_postprocess.load_class_names(dataset="CROP")
+            self.format = "crop"
+        elif "KITTI" in self.model_name or "kitti" in self.model_name.lower():
+            self.class_names = self.model_postprocess.load_class_names(dataset="KITTI")
+            self.format = "kitti"
+        else:
+            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
+            self.class_names = None
+            self.format = None
+            
+        
+    def _init_model_io(self):
+        """
+        Fetch the model metadata and initialize the model input and output tensors
+        on the client side from the gRPC endpoint of Triton server.
+        Rest API is not supported. 
+        """
+        self.meta_data = self.endpoint.get_metadata()
+        self.input_metadata, self.output_metadata = self.model.parse_model(
+            self.meta_data["metadata_response"], self.meta_data["config_response"].config
+        )
+        self.endpoint.input = [input["name"] for input in self.input_metadata]
+        self.endpoint.output = [output["name"] for output in self.output_metadata]
+
+        self.inputs = {}
+        for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
+            self.inputs[
+                "input_{}".format(i)
+            ] = service_pb2.ModelInferRequest().InferInputTensor()
+            self.inputs["input_{}".format(i)].name = input["name"]
+            self.inputs["input_{}".format(i)].datatype = input["dtype"]
+            if -1 in input["shape"]:
+                input["shape"][0] = 10000  # tmp
+            self.inputs["input_{}".format(i)].shape.extend(input["shape"])
+            # assign the gathered model inputs to the grpc channel
+            self.endpoint.request.inputs.extend([self.inputs["input_{}".format(i)]])
+
+        self.outputs = {}
+        for output, i in zip(self.output_metadata, range(len(self.output_metadata))):
+            self.outputs[
+                "output_{}".format(i)
+            ] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
+            self.outputs["output_{}".format(i)].name = output["name"]
+            # assign the gathered model outputs to the grpc channel
+            self.endpoint.request.outputs.extend([self.outputs["output_{}".format(i)]])
+
 class TritonInference:
     def __init__(self, 
-                 model_name='yolov5m_coco', 
+                 model_name: list[str]=['yolov5m_coco'], 
                  seerep_endpoint_url='agrigaia-ur.ni.dfki:9090', 
                  triton_endpoint_url='10.249.6.23:8001', 
                  log_level='error',
                  visualize=False,
                  modality='image'):
-        self.model_name = model_name
+        self.model_names = model_name
         self.seerep_endpoint = SeerepEndpoint(
             seerep_endpoint_url,
             modality=modality,
             visualize=False, 
             log_level=log_level
             )
-        self.triton_endpoint = TritonEndpoint(
-            model_name=model_name,
-            endpoint_url=triton_endpoint_url,
-            log_level=log_level
-            )
-        
+        # TODO Create multiple endpoints for multiple models passed as string list
+        self.models = {}
         self.modality = modality
         self.log_level = log_level
         self.visualize = visualize
+        self.triton_endpoint_url = triton_endpoint_url
         self._initialize_models()
         self._initialize_misc()
         logging.basicConfig(level=self.log_level[log_level])
@@ -78,67 +148,21 @@ class TritonInference:
         else:
             logger.error(f"Unsupported modality: {self.modality} \n Supported modalities are case-sensitive: image, pointcloud")
             sys.exit(1)
-        if self.model_name not in self.models_database.keys():
-            logger.error(
-                f"Model {self.model_name} not found in the models database for {self.modality} modality.\n"
-                f"Supported models are: {list(self.models_database.keys())}" 
+        for model in self.model_names:
+            if model not in self.models_database.keys():
+                logger.error(
+                    f"Model {self.model_names} not found in the models database for {self.modality} modality.\n"
+                    f"Supported models are: {list(self.models_database.keys())}" 
+                )
+                sys.exit(1)
+            curr_model = self.models_database.get(model)(model_name=model)
+            model_instance = ModelData(
+                model=curr_model,
+                model_preprocess=curr_model.get_preprocess(),
+                model_postprocess=curr_model.get_postprocess()
             )
-            sys.exit(1)
-        f"Supported models are: {self.models_database.keys()}"
-        self.model = self.models_database.get(self.model_name)(model_name=self.model_name)
-        self.model_preprocess = self.model.get_preprocess()
-        self.model_postprocess = self.model.get_postprocess()
-        self._initialize_model_inputs()
-        
-    def _initialize_model_inputs(self):
-        """
-        Register the GRPC endpoint for Triton server and fetch model metadata and configuration.
-        HTTP endpoint is not supported yet. 
-        """
-        # for GRPC channel
-        if type(self.triton_endpoint) == TritonEndpoint:
-            self._init_model_io()
-        else:
-            logger.error("Triton endpoint is not initialized correctly.")
-            sys.exit(1)
-    
-    def _init_model_io(self):
-        """
-        Fetch the model metadata and initialize the model input and output tensors
-        on the client side from the gRPC endpoint of Triton server.
-        Rest API is not supported. 
-        """
-        # collect meta data of model and configuration
-        meta_data = self.triton_endpoint.get_metadata()
-
-        # parse the model requirements from client
-        self.input_metadata, self.output_metadata = self.model.parse_model(
-            meta_data["metadata_response"], meta_data["config_response"].config
-        )
-        self.triton_endpoint.input = [input["name"] for input in self.input_metadata]
-        self.triton_endpoint.output = [output["name"] for output in self.output_metadata]
-
-        self.inputs = {}
-        for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
-            self.inputs[
-                "input_{}".format(i)
-            ] = service_pb2.ModelInferRequest().InferInputTensor()
-            self.inputs["input_{}".format(i)].name = input["name"]
-            self.inputs["input_{}".format(i)].datatype = input["dtype"]
-            if -1 in input["shape"]:
-                input["shape"][0] = 10000  # tmp
-            self.inputs["input_{}".format(i)].shape.extend(input["shape"])
-            # assign the gathered model inputs to the grpc channel
-            self.triton_endpoint.request.inputs.extend([self.inputs["input_{}".format(i)]])
-
-        self.outputs = {}
-        for output, i in zip(self.output_metadata, range(len(self.output_metadata))):
-            self.outputs[
-                "output_{}".format(i)
-            ] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-            self.outputs["output_{}".format(i)].name = output["name"]
-            # assign the gathered model outputs to the grpc channel
-            self.triton_endpoint.request.outputs.extend([self.outputs["output_{}".format(i)]])
+            model_instance.init_endpoint(endpoint_url=self.triton_endpoint_url, log_level=self.log_level)
+            self.models[model] = model_instance
 
     def _initialize_misc(self):
         """
@@ -191,59 +215,9 @@ class TritonInference:
                 "path": ""
             }
         }
-        if "COCO" or "coco" in self.model_name:
-            self.class_names = self.model_postprocess.load_class_names(dataset="COCO")
-            self.format = "coco"
-        elif "CROP" in self.model_name:
-            self.class_names = self.model_postprocess.load_class_names(dataset="CROP")
-            self.format = "crop"
-        elif "KITTI" in self.model_name or "kitti" in self.model_name.lower():
-            self.class_names = self.client_postprocess.load_class_names(dataset="KITTI")
-            self.format = "kitti"
-        else:
-            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
-            self.class_names = None
-            
-    def _configure_model_params(self):
-        """
-        Fetch and set the model metadata and configuration 
-        on the client side from the gRPC endpoint of Triton server.
-        Rest API is not supported. 
-        """
-        # collect meta data of model and configuration
-        meta_data = self.triton_endpoint.get_metadata()
-
-        # parse the model requirements from client
-        self.input_metadata, self.output_metadata = self.model.parse_model(
-            meta_data["metadata_response"], meta_data["config_response"].config
-        )
-        self.triton_endpoint.input = [input["name"] for input in self.input_metadata]
-        self.triton_endpoint.output = [output["name"] for output in self.output_metadata]
-
-        self.inputs = {}
-        for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
-            self.inputs[
-                "input_{}".format(i)
-            ] = service_pb2.ModelInferRequest().InferInputTensor()
-            self.inputs["input_{}".format(i)].name = input["name"]
-            self.inputs["input_{}".format(i)].datatype = input["dtype"]
-            if -1 in input["shape"]:
-                input["shape"][0] = 10000  # tmp
-            self.inputs["input_{}".format(i)].shape.extend(input["shape"])
-            # assign the gathered model inputs to the grpc channel
-            self.triton_endpoint.request.inputs.extend([self.inputs["input_{}".format(i)]])
-
-        self.outputs = {}
-        for output, i in zip(self.output_metadata, range(len(self.output_metadata))):
-            self.outputs[
-                "output_{}".format(i)
-            ] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-            self.outputs["output_{}".format(i)].name = output["name"]
-            # assign the gathered model outputs to the grpc channel
-            self.triton_endpoint.request.outputs.extend([self.outputs["output_{}".format(i)]])
 
     # TODO add dynamic confidence value and 
-    def triton_infer_image(self, cv_image, filter_class_idx=0)->list[np.ndarray]:
+    def triton_infer_image(self, cv_image, model_key: str, filter_class_idx: int=0)->list[np.ndarray]:
         """
         Perform inference on a single image via the Triton server gRPC endpoint.
         By default, the image is resized to the model input size.
@@ -257,7 +231,7 @@ class TritonInference:
         """
         self.orig_image = cv_image.copy()
         original_h, original_w = cv_image.shape[0], cv_image.shape[1]
-        cv_image, model_input_h, model_input_w = resize(cv_image, self.input_metadata)
+        cv_image, model_input_h, model_input_w = resize(cv_image, input_metadata)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
         # cv2.waitKey(0)
@@ -267,7 +241,7 @@ class TritonInference:
         self.image = self.model_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
         self.image = self.image.astype(
-            self.input_datatypes[self.input_metadata[0]['dtype']]
+            self.input_datatypes[input_metadata[0]['dtype']]
         )
         if self.image is not None:
             self.triton_endpoint.request.ClearField("inputs")
@@ -442,12 +416,32 @@ class TritonInference:
             sample_uuids (list): List of sample UUIDs to generate annotations for.
         Returns:
         """
-        data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_name)
+        data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_names)
         data = self.generate_datumaro_predictions(data)
         data = self.seerep_endpoint.send_dataset(uuids=sample_uuids,
                                                 data=data,
-                                                category=self.model_name)
+                                                category=self.model_names)
         return data
+    
+    def fetch_data_by_sample_uuids(self, sample_uuids: list[str])->list[dict]:
+        """
+        Fetch data from the SEEREP server for the given sample UUIDs.
+        Args:
+            sample_uuids (list): List of sample UUIDs to fetch data for.
+        Returns:
+            list: List of data samples.
+        """
+        return self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_names)
+    
+    def request_triton_inference(self, data: list[dict])->list[dict]:
+        """
+        Perform inference on the given data using the Triton inference model.
+        Args:
+            data (list): List of data samples to perform inference on.
+        Returns:
+            list: List of data samples with predictions.
+        """
+        return self.generate_datumaro_predictions(data)
     
     def get_project_uuid(self, project_name: str)->str:
         """
@@ -468,10 +462,10 @@ class TritonInference:
         """
         # project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
         # data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
-        #                                             model_name=self.model_name)
+        #                                             model_name=self.model_names)
         # # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
         sample_uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid(project_uuids)
-        data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_name)
+        data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_names)
         data = self.generate_datumaro_predictions(data)
 
         return data

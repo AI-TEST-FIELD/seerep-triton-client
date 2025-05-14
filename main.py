@@ -5,6 +5,7 @@ example_project_uuid = '52a469bd-4222-4753-9c3e-8b5bfef1d15a'
 example_uuids = ['1957e21a-2f4f-40f5-b4de-b0a693fd7bc0',
                'f90f8e7c-1e08-4868-ad8d-a6f690ebca94']
 model_name = 'yolov5m_coco'
+model_names = ['yolov5m_coco', 'retinanet_coco', 'yolov5m_iso']
 
 
 # example_project_name = 'map'
@@ -16,15 +17,17 @@ model_name = 'yolov5m_coco'
 
 seerep_endpoint = "agrigaia-ur.ni.dfki:9090" #    URL tested with images
 # seerep_endpoint = "localhost:9090"             #    URL tested with SEEREP server v0.3.5 
-triton_endpoint = "10.249.6.30:8001"
+triton_endpoint = "10.249.6.4:8001"
 
 
 triton_client  = TritonInference(
-                                model_name=model_name,
+                                model_name=model_names,
                                 seerep_endpoint_url=seerep_endpoint,
                                 triton_endpoint_url=triton_endpoint,
                                 log_level='info',
                                 modality='image')
+
+
 # 1. When we want to process data in terms of samples from the SEEREP server
 triton_client.generate_annotations_by_sample_uuids(sample_uuids=example_uuids)
 

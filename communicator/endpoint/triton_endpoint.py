@@ -29,7 +29,7 @@ class TritonEndpoint:
 
         self.register_grpc_channel() # register and initialise the stub
         self._fetch_model_metadata() #
-        logger.info("Triton Channel initialized successfully via endpoint : {} ".format(self.endpoint_url))
+        logger.info("Triton Channel initialized successfully via endpoint for model: {} ".format(self.endpoint_url, self.model_name))
 
 
     def register_grpc_channel(self):

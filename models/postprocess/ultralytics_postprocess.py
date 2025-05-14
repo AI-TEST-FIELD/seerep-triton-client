@@ -20,6 +20,8 @@ class Ultralytics_postprocess(Postprocess):
             namesfile = './config/coco.names'
         elif dataset=='CROP':
             namesfile='./config/crop.names'
+        elif dataset=='ISO':
+            namesfile='./config/aitf.names'
         else:
             print('[ERROR] No valid dataset was provided. Exiting!')
             sys.exit(0)
