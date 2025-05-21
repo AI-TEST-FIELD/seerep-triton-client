@@ -448,7 +448,7 @@ class SeerepEndpoint:
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
             sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
             sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
-            sample['processed'] = False
+            sample['processed'] = []
             sample['no_grountruth'] = False
             sample['annotations'] = {
                 "info": {},
@@ -476,8 +476,13 @@ class SeerepEndpoint:
                             )
                         )
             # This condition makes sure we do not predict the labels twice and send them back again to SEEREP
-            if model_name in sample['annotations']['categories']['label']['labels']:
-                sample['processed']  = True
+            
+            # Check which entries in model_name are present in the labels and add them to 'processed'
+            if isinstance(model_name, list):
+                sample['processed'] = [name for name in model_name if name in sample['annotations']['categories']['label']['labels']]
+            else:
+                if model_name in sample['annotations']['categories']['label']['labels']:
+                    sample['processed'].append(model_name)
             if len(sample['annotations']['items'][0]['annotations']) == 0:
                 sample['no_grountruth'] = True
             data.append(sample.copy())

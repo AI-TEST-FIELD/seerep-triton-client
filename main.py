@@ -1,9 +1,14 @@
+import logging
 from triton import TritonInference
+from logger import Client_logger, TqdmToLogger
+logger = Client_logger(name='SEEREP-Client', level=logging.INFO).get_logger()
+tqdm_out = TqdmToLogger(logger,level=logging.INFO)
 
 example_project_name = 'EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0'
 example_project_uuid = '52a469bd-4222-4753-9c3e-8b5bfef1d15a'
-example_uuids = ['1957e21a-2f4f-40f5-b4de-b0a693fd7bc0',
-               'f90f8e7c-1e08-4868-ad8d-a6f690ebca94']
+example_uuids = ['abe39aac-a91a-464d-a2b4-896a3a9075fc',
+               '5542cecf-1dfb-4875-9ae5-c0d2a6d54bc7']
+
 model_name = 'yolov5m_coco'
 model_names = ['yolov5m_coco', 'retinanet_coco', 'yolov5m_iso']
 
@@ -26,10 +31,19 @@ triton_client  = TritonInference(
                                 triton_endpoint_url=triton_endpoint,
                                 log_level='info',
                                 modality='image')
-
-
+# Fetch data only once before generating annotations for each model
+data = triton_client.seerep_endpoint.fetch_data_by_sample_uuid(example_uuids, model_name=model_names)
+for model_name in model_names:
+    logger.info("Generating annotations for model: %s", model_name)
+    data = triton_client.generate_datumaro_predictions(data, model_key=model_name)
+    # data = triton_client.seerep_endpoint.send_dataset(
+    #                                                 uuids=example_uuids,
+    #                                                 data=data,
+    #                                                 category=model_name)
+    
+    
 # 1. When we want to process data in terms of samples from the SEEREP server
-triton_client.generate_annotations_by_sample_uuids(sample_uuids=example_uuids)
+# triton_client.generate_annotations_by_sample_uuids(sample_uuids=example_uuids)
 
 # 2. When we want to process data in terms of projects uuids from the SEEREP server
 # triton_client.generate_annotations_by_project_uuids(project_uuids=[example_project_uuid])

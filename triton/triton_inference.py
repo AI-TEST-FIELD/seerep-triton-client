@@ -231,26 +231,29 @@ class TritonInference:
         """
         self.orig_image = cv_image.copy()
         original_h, original_w = cv_image.shape[0], cv_image.shape[1]
-        cv_image, model_input_h, model_input_w = resize(cv_image, input_metadata)
+        cv_image, model_input_h, model_input_w = resize(cv_image, 
+                                                        self.models[model_key].input_metadata)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
         # cv2.waitKey(0)
         # cv2.destroyWindow(named_window)
         # if self.visualize:
         #     tmp = cv_image.copy()
-        self.image = self.model_preprocess.image_adjust(cv_image)
+        self.image = self.models[model_key].model_preprocess.image_adjust(cv_image)
         # convert to input data type the model expects
         self.image = self.image.astype(
-            self.input_datatypes[input_metadata[0]['dtype']]
+            self.input_datatypes[self.models[model_key].input_metadata[0]['dtype']]
         )
         if self.image is not None:
-            self.triton_endpoint.request.ClearField("inputs")
-            self.triton_endpoint.request.ClearField("raw_input_contents")  # Flush the previous image contents
-            self.triton_endpoint.request.inputs.extend([self.inputs['input_0']])
-            self.triton_endpoint.request.raw_input_contents.extend([self.image.tobytes()])
-            self.triton_endpoint.response = self.triton_endpoint.do_inference()  # Inference
-            self.prediction = self.model_postprocess.extract_boxes(
-                self.triton_endpoint.response,
+            self.models[model_key].endpoint.request.ClearField("inputs")
+            self.models[model_key].endpoint.request.ClearField("raw_input_contents")  # Flush the previous image contents
+            self.models[model_key].endpoint.request.inputs.extend(
+                [self.models[model_key].inputs['input_0']])
+            self.models[model_key].endpoint.request.raw_input_contents.extend(
+                [self.image.tobytes()])
+            self.models[model_key].endpoint.response = self.models[model_key].endpoint.do_inference()  # Inference
+            self.prediction = self.models[model_key].model_postprocess.extract_boxes(
+                self.models[model_key].endpoint.response,
             )
             if len(self.prediction[1]) > 0:
                 self.prediction[0] = scale_box_array(
@@ -261,7 +264,7 @@ class TritonInference:
                 )
                 # if self.visualize:
                 #     self.visualize_img(self.orig_image, self.prediction[0], mode='BGR')
-                if self.format == "kitti" or self.format == "coco" or self.format == "aitf":
+                if self.models[model_key].format == "coco" or self.models[model_key].format == "aitf":
                     persons = np.where(self.prediction[1] == 0)  # filter Pedestrians
                     return (
                         self.prediction[0][persons],
@@ -339,7 +342,9 @@ class TritonInference:
                 ref_labels=labels[indices],
             )
     
-    def generate_datumaro_predictions(self, data: list[dict])->list[dict]:
+    def generate_datumaro_predictions(self, 
+                                      data: list[dict], 
+                                      model_key: str)->list[dict]:
         """
         Iterates through the data samples and performs inference on each image sample.
         Adds the predictions to the individual sample as data[sample_idx]['annotations'] in datumaro format.
@@ -382,7 +387,7 @@ class TritonInference:
                     }
                     # perform inference on each image, iteratively
                     t3 = time.time()
-                    pred = infer_function(sample[data_key])
+                    pred = infer_function(sample[data_key], model_key=model_key)
                     t4 = time.time()
                     infer_array[seerep_sample_idx] = t4 - t3
                     # traverse the predictions for the current image
@@ -391,16 +396,16 @@ class TritonInference:
                                                                     model_output=pred,
                                                                     sample_idx=seerep_sample_idx,
                                                                     visualize=self.visualize,
-                                                                    class_names=self.class_names)
+                                                                    class_names=self.models[model_key].class_names)
                             
                     data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
                 if self.visualize:
                     visualize(sample, 
-                            'self.winname', 
-                            self.class_names,
+                            self.models[model_key].model_name, 
+                            self.models[model_key].class_names,
                             new_model_key=False,
-                            model_name=None
+                            model_name=self.models[model_key].model_name
                             )
             if self.visualize:
                 cv2.destroyWindow(self.winname) 
@@ -460,9 +465,9 @@ class TritonInference:
             sample_uuids (list): List of sample UUIDs to generate annotations for.
         Returns:
         """
-        # project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
-        # data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
-        #                                             model_name=self.model_names)
+        project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
+        data = self.seerep_endpoint.fetch_data_by_project([project_uuid], 
+                                                    model_name=self.model_names)
         # # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
         sample_uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid(project_uuids)
         data = self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_names)
