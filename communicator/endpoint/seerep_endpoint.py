@@ -107,9 +107,12 @@ class SeerepEndpoint:
         self.intialize_gRPC_stubs()
         
         # self.ann_dict = self.annotation_dict(format=format)
-        if self.visualize:
+        if self.visualize and self.modality == 'image':
             self.source_window = 'SEEREP source image'
             cv2.namedWindow(self.source_window)
+        elif self.visualize and self.modality == 'pointcloud':
+            self.source_window = 'SEEREP source pointcloud'
+            self.visualizer = Visualizer(origin=True)
         logger.info("SEEREP Channel initialized successfully via endpoint : {} ".format(self.endpoint_url))
 
     def register_grpc_channel(self):
@@ -161,7 +164,8 @@ class SeerepEndpoint:
         """
          Establish a channel for querying TFs
         """
-        tf_stub  = tfService.TfServiceStub(self.channel)
+        grpc_channel = self.register_grpc_channel()
+        tf_stub  = tfService.TfServiceStub(grpc_channel)
         builder = self.init_builder()
 
         return (tf_stub, builder)
@@ -259,7 +263,70 @@ class SeerepEndpoint:
         else:
             logger.error("Modality not supported. Please use image or pointcloud")
             sys.exit(0)
+    
+    def process_images(self, buffer, model_name, num_samples:int=10)->dict:
+        '''
+        buffer: flatbuffer buffer containing the query message 
+        generated using the SEEREP createQuery function
+        model_name: name of the model for which the predictions are to be generated.
+        Returns a list of dictionaries containing the data samples with the following
+        keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
+        '''
+        data = []
+        data_generator = self._grpc_stub.GetImage(bytes(buffer))
+        for responseBuf in tqdm(data_generator,
+                                total=num_samples, 
+                                desc="Fetching images from the SEEREP server",
+                                colour="blue", 
+                                unit=" image(s)"):
+            sample = {}
+            response = Image.Image.GetRootAs(responseBuf)
+            msguuid = response.Header().UuidMsgs().decode("utf-8")
+            sample['uuid'] = msguuid
+            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
+            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
+            sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
+            sample['processed'] = []
+            sample['no_grountruth'] = False
+            sample['annotations'] = {
+                "info": {},
+                "categories": {
+                    "label": {
+                        "labels": [],
+                        "attributes": [],
+                    },
+                    "points": {"items": []},
+                },
+                "items": [],
+            }
+            labels: Set[Tuple[str, int]] = set()
+            for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
+                category_with_labels = response.Labels(label_idx)
+                if(not (category_with_labels.Category().decode() == 'labelGeneral')):
+                    item = json.loads(category_with_labels.DatumaroJson().decode())
+                    sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
+                    sample['annotations']["items"].append(item)
+                    for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
+                        labels.add(
+                            (
+                                category_with_labels.Labels(j).Label().decode(),
+                                category_with_labels.Labels(j).LabelIdDatumaro(),
+                            )
+                        )
+            # This condition makes sure we do not predict the labels twice and send them back AGAIN!!! to SEEREP
             
+            # Check which entries in model_name are present in the labels and add them to 'processed'
+            if isinstance(model_name, list):
+                sample['processed'] = [name for name in model_name if name in sample['annotations']['categories']['label']['labels']]
+            else:
+                if model_name in sample['annotations']['categories']['label']['labels']:
+                    sample['processed'].append(model_name)
+            if len(sample['annotations']['items'][0]['annotations']) == 0:
+                sample['no_grountruth'] = True
+            data.append(sample.copy())
+        logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
+        return data
+    
     def process_pointclouds(self, buffer, model_name, num_samples:int=10)->dict:
         '''
         buffer: flatbuffer buffer containing the query message 
@@ -290,6 +357,19 @@ class SeerepEndpoint:
             sample['project_uuid'] = projuuid
             sample['sensor_name'] = response.Header().FrameId().decode("utf-8")
             sample['timestamp'] = timestamp
+            sample['processed'] = []
+            sample['no_grountruth'] = False
+            sample['annotations'] = {
+                "info": {},
+                "categories": {
+                    "label": {
+                        "labels": [],
+                        "attributes": [],
+                    },
+                    "points": {"items": []},
+                },
+                "items": [],
+            }
             raw_data = response.DataAsNumpy()
             fields = {}
             dtype = None
@@ -313,7 +393,7 @@ class SeerepEndpoint:
                     strs.append(sb)
                 fields[field]['data'] = (np.array(strs, dtype=np.object_))
                 strs = []
-            sample['point_cloud'] = copy(fields) 
+            sample['pointcloud'] = copy(fields) 
             if 'reflectivity' in fields:
                 sample['lidar_feature'] = 'reflectivity'
             else:
@@ -323,15 +403,40 @@ class SeerepEndpoint:
                 pc[:, 0] = fields['x']['data'][:, 0]
                 pc[:, 1] = fields['y']['data'][:, 0]
                 pc[:, 2] = fields['z']['data'][:, 0]
-                Visualizer.draw_scenes(pc)
+                self.visualizer.draw_scenes(points=pc)
+                
+            # TODO Fetch the labels for pointclouds from SEEREP server
+            # labels: Set[Tuple[str, int]] = set()
+            # for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
+            #     category_with_labels = response.Labels(label_idx)
+            #     if(not (category_with_labels.Category().decode() == 'labelGeneral')):
+            #         item = json.loads(category_with_labels.DatumaroJson().decode())
+            #         sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
+            #         sample['annotations']["items"].append(item)
+            #         for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
+            #             labels.add(
+            #                 (
+            #                     category_with_labels.Labels(j).Label().decode(),
+            #                     category_with_labels.Labels(j).LabelIdDatumaro(),
+            #                 )
+            #             )
+            # # This condition makes sure we do not predict the labels twice and send them back AGAIN!!! to SEEREP
+            # # Check which entries in model_name are present in the labels and add them to 'processed'
+            if isinstance(model_name, list):
+                sample['processed'] = [name for name in model_name if name in sample['annotations']['categories']['label']['labels']]
+            else:
+                if model_name in sample['annotations']['categories']['label']['labels']:
+                    sample['processed'].append(model_name)
+            # if len(sample['annotations']['items'][0]['annotations']) == 0:
+            #     sample['no_grountruth'] = True  
             # Store the sample into data collection
-            data.append(sample)
+            data.append(sample.copy())
             # flush the sample data for new incoming samples
             sample={}    
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
         # TODO Does the parent frame change a lot to be dynamic? 
         data = self.run_query_tf(data, parent_frame='base_link')
-        data = self.preprocess_pc(data)
+        data = self.preprocess_pc(data, model_name=model_name, num_samples=num_samples)
         return data
     
     @staticmethod
@@ -425,69 +530,6 @@ class SeerepEndpoint:
             anns_dict[idx+1] = id
 
         return anns_dict
-
-    def process_images(self, buffer, model_name, num_samples:int=10)->dict:
-        '''
-        buffer: flatbuffer buffer containing the query message 
-        generated using the SEEREP createQuery function
-        model_name: name of the model for which the predictions are to be generated.
-        Returns a list of dictionaries containing the data samples with the following
-        keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
-        '''
-        data = []
-        data_generator = self._grpc_stub.GetImage(bytes(buffer))
-        for responseBuf in tqdm(data_generator,
-                                total=num_samples, 
-                                desc="Fetching images from the SEEREP server",
-                                colour="blue", 
-                                unit=" image(s)"):
-            sample = {}
-            response = Image.Image.GetRootAs(responseBuf)
-            msguuid = response.Header().UuidMsgs().decode("utf-8")
-            sample['uuid'] = msguuid
-            sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
-            sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
-            sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
-            sample['processed'] = []
-            sample['no_grountruth'] = False
-            sample['annotations'] = {
-                "info": {},
-                "categories": {
-                    "label": {
-                        "labels": [],
-                        "attributes": [],
-                    },
-                    "points": {"items": []},
-                },
-                "items": [],
-            }
-            labels: Set[Tuple[str, int]] = set()
-            for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
-                category_with_labels = response.Labels(label_idx)
-                if(not (category_with_labels.Category().decode() == 'labelGeneral')):
-                    item = json.loads(category_with_labels.DatumaroJson().decode())
-                    sample['annotations']['categories']["label"]["labels"].append(category_with_labels.Category().decode())
-                    sample['annotations']["items"].append(item)
-                    for j in range(category_with_labels.LabelsLength()):    # Here LabelsLength correspond to number of labels per category
-                        labels.add(
-                            (
-                                category_with_labels.Labels(j).Label().decode(),
-                                category_with_labels.Labels(j).LabelIdDatumaro(),
-                            )
-                        )
-            # This condition makes sure we do not predict the labels twice and send them back again to SEEREP
-            
-            # Check which entries in model_name are present in the labels and add them to 'processed'
-            if isinstance(model_name, list):
-                sample['processed'] = [name for name in model_name if name in sample['annotations']['categories']['label']['labels']]
-            else:
-                if model_name in sample['annotations']['categories']['label']['labels']:
-                    sample['processed'].append(model_name)
-            if len(sample['annotations']['items'][0]['annotations']) == 0:
-                sample['no_grountruth'] = True
-            data.append(sample.copy())
-        logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
-        return data
         
     def process_uuids(self, buffer)->list[str]:
         '''
@@ -513,7 +555,7 @@ class SeerepEndpoint:
         logger.info('Fetched {} UUIDs from the current SEEREP project'.format(len(data)))
         return data
     
-    def preprocess_pc(self, pointcloud_data: dict) -> dict:
+    def preprocess_pc(self, pointcloud_data: dict, model_name: list, num_samples:int=10) -> dict:
         """
         Processing Steps:
             1. Transforms Point Cloud into the Robot base_frame, based on homegenous transform from the calibration procedure.
@@ -532,21 +574,22 @@ class SeerepEndpoint:
         """
 
         # dictionary for sensor and dataset transformations
-        if 'kitti' in self.model_name:
+        # TODO how to change this to be compatible with a list of models?
+        if 'kitti' in model_name[0]:
             dataset_translation = [0.0, 0.0, -1.026558971]
         # TODO add nuscenes translation
-        elif 'nuscenes' in self.model_name: 
+        elif 'nuscenes' in model_name[0]: 
             dataset_translation = [0.0, 0.0, -1.026558971]  
         else:
-            logger.error(f"Dataset {self.model_name} not supported. Please use kitti or nuscenes.")
+            logger.error(f"Dataset {model_name[0]} not supported. Please use kitti or nuscenes.")
             return None
         for sample in tqdm(pointcloud_data,
-                                    desc='Transforming pointclouds',
-                                    unit="samples",
-                                    colour='YELLOW',
-                                    total=len(pointcloud_data)):
+                            desc='Transforming pointclouds',
+                            unit="samples",
+                            colour='YELLOW',
+                            total=len(pointcloud_data)):
             # check if the sample has a tf
-            if sample['transform_matrix'] is not None:
+            if 'transform_matrix' in sample:
                 # get the transform matrix for the current pc sample
                 transform_matrix = np.array(sample['transform_matrix']).reshape(4, 4)
             else:
@@ -564,7 +607,7 @@ class SeerepEndpoint:
             feature_field = sample['lidar_feature']
 
             # preprocessing steps
-            raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=sample['point_cloud'], feature_field=feature_field)
+            raw_o3d_pcd = pcd_ros_to_o3d(ros_pcd=sample['pointcloud'], feature_field=feature_field)
             preprocessed_o3d_pcd = raw_o3d_pcd.transform(sensor_to_robot_base_transform)
             preprocessed_o3d_pcd = preprocessed_o3d_pcd.translate(
                 robot_base_to_train_dataset_translation
@@ -573,7 +616,7 @@ class SeerepEndpoint:
                 o3d_pcd=preprocessed_o3d_pcd, feature_field=feature_field
             )
             preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
-            pointcloud_data[pointcloud_data.index(sample)]['point_cloud_processed'] = preprocessed_np_pcd
+            pointcloud_data[pointcloud_data.index(sample)]['pointcloud_processed'] = preprocessed_np_pcd
             
         return pointcloud_data
     
@@ -629,14 +672,15 @@ class SeerepEndpoint:
             header = createHeader(
                 builder=builder,
                 timeStamp=timestamp,
-                frame=parent_frame,
-                projectUuid=self._projectid
+                frame=parent_frame, # Parent frame ID should be the base link
+                msgUuid=sample['uuid'],
+                projectUuid=sample['project_uuid']
             )
             if parent_frame in frames:
                 tf_query = createTransformStampedQuery(
                     builder=builder,
                     header=header,  
-                    childFrameId=sample['sensor_name'],  # base_link
+                    childFrameId=sample['sensor_name'],  # Child frame ID should be the sensor name sample['sensor_name']
                 )
             else:
                 logger.error(f"Parent frame {parent_frame} not found in the following list of frames:")

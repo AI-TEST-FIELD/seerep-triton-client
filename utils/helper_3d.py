@@ -1,5 +1,6 @@
 import numpy as np
 import open3d
+# DEPRECATED
 def postprocess_model_output(sample:dict, 
                              model_output:np.array,
                              sample_idx:int,

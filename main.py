@@ -10,36 +10,39 @@ example_uuids = ['abe39aac-a91a-464d-a2b4-896a3a9075fc',
                '5542cecf-1dfb-4875-9ae5-c0d2a6d54bc7']
 
 model_name = 'yolov5m_coco'
-model_names = ['yolov5m_coco', 'retinanet_coco', 'yolov5m_iso']
+model_names = ['yolov5m_coco', 'retinanet_coco']
 
 
 # example_project_name = 'map'
 # example_project_uuid = 'c8a411ab-f3c9-4f41-b38f-9d1c73515cce'
 # example_uuids = ['7ffc1491-b083-4929-b70a-b2e1c45e49ba',
 #            'c0cb19f2-1a02-4d90-85e0-9a900b8a0f46']
-# model_name = 'second_iou_kitti'
+# model_names = ['second_iou_kitti']
 
 
 seerep_endpoint = "agrigaia-ur.ni.dfki:9090" #    URL tested with images
 # seerep_endpoint = "localhost:9090"             #    URL tested with SEEREP server v0.3.5 
 triton_endpoint = "10.249.6.4:8001"
 
+visualize = False
 
 triton_client  = TritonInference(
                                 model_name=model_names,
                                 seerep_endpoint_url=seerep_endpoint,
                                 triton_endpoint_url=triton_endpoint,
                                 log_level='info',
+                                visualize=visualize,
                                 modality='image')
 # Fetch data only once before generating annotations for each model
 data = triton_client.seerep_endpoint.fetch_data_by_sample_uuid(example_uuids, model_name=model_names)
 for model_name in model_names:
     logger.info("Generating annotations for model: %s", model_name)
     data = triton_client.generate_datumaro_predictions(data, model_key=model_name)
-    # data = triton_client.seerep_endpoint.send_dataset(
-    #                                                 uuids=example_uuids,
-    #                                                 data=data,
-    #                                                 category=model_name)
+    print('data')
+    data = triton_client.seerep_endpoint.send_dataset(
+                                                    uuids=example_uuids,
+                                                    data=data,
+                                                    category='groundtruth')
     
     
 # 1. When we want to process data in terms of samples from the SEEREP server

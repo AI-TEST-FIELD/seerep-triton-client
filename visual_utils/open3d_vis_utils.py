@@ -99,7 +99,7 @@ def draw_box(vis, gt_boxes, color=(0, 1, 0), ref_labels=None, score=None):
         #     vis.add_3d_label(corners[5], '%.2f' % score[i])
     return vis
     
-class Visualizer():
+class Visualizer:
     def __init__(self, 
                  origin=True,
                  point_colors=None,
@@ -113,7 +113,7 @@ class Visualizer():
             self.vis = open3d.visualization.VisualizerWithKeyCallback()
         self.vis.create_window()
         ctr = self.vis.get_view_control()
-        # #This line will obtain the default camera parameters .
+        # This line will obtain the default camera parameters .
         camera_params = ctr.convert_to_pinhole_camera_parameters() 
         # Define the desired camera extrinsic parameters.
         # TODO this does not do anything. WHY?
@@ -121,29 +121,11 @@ class Visualizer():
                                             [-0.99703926833339696, 0.063882646483045008, 0.042798421460690204, 0.0],
                                             [-0.069171483507295253, -0.98824470269635745, -0.13633676489483001, 0.0],
                                             [1.2936070652362615, 7.8928817882678945, 21.5193268164304, 1.0]])
-            # [
-            #     0.033585759937874757,
-            #     -0.13889353862189011,
-            #     0.98973763273833582,
-            #     0.0,
-            #     -0.99703926833339696,
-            #     0.063882646483045008,
-            #     0.042798421460690204,
-            #     0.0,
-            #     -0.069171483507295253,
-            #     -0.98824470269635745,
-            #     -0.13633676489483001,
-            #     0.0,
-            #     1.2936070652362615,
-            #     7.8928817882678945,
-            #     21.5193268164304,
-            #     1.0
-            # ],
         camera_params.extrinsic = np.eye(4)
         ctr.convert_from_pinhole_camera_parameters(camera_params)
         # draw origin
         if origin==True:
-            axis_pcd = open3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+            axis_pcd = open3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
             self.vis.add_geometry(axis_pcd)
         self.vis.get_render_option().point_size = 1.5
         self.vis.get_render_option().background_color = np.zeros(3)

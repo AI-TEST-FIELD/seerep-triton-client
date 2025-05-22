@@ -15,6 +15,7 @@ from utils import (
     resize,
     scale_box_array,
     process_model_output,
+    DatumaroAnnotation,
     visualize,
 )
 
@@ -104,7 +105,7 @@ class TritonInference:
         self.seerep_endpoint = SeerepEndpoint(
             seerep_endpoint_url,
             modality=modality,
-            visualize=False, 
+            visualize=visualize, 
             log_level=log_level
             )
         # TODO Create multiple endpoints for multiple models passed as string list
@@ -112,6 +113,12 @@ class TritonInference:
         self.modality = modality
         self.log_level = log_level
         self.visualize = visualize
+        if self.visualize and self.modality == 'image':
+            self.source_window = 'Inferred image'
+            cv2.namedWindow(self.source_window)
+        elif self.visualize and self.modality == 'pointcloud':
+            self.source_window = 'Inferred pointcloud'
+            self.visualizer = Visualizer(origin=True)
         self.triton_endpoint_url = triton_endpoint_url
         self._initialize_models()
         self._initialize_misc()
@@ -276,7 +283,11 @@ class TritonInference:
             else:
                 return self.prediction
     
-    def triton_infer_pointcloud(self, pointcloud:np.ndarray, filter_class_idx=2, confidence=0.4)->list[np.ndarray]:
+    def triton_infer_pointcloud(self, 
+                                pointcloud:np.ndarray, 
+                                model_key: str,
+                                confidence_threshold: float=0.4,
+                                class_idx: int=1)->list[np.ndarray]:
         """
         Perform inference on the point cloud data.
         :param sample: Point cloud data
@@ -284,18 +295,18 @@ class TritonInference:
         :param class_idx: Class index for filtering predictions
         :return: Filtered predictions
         """
-        self.pc = self.client_preprocess.filter_pc(pointcloud)
+        self.pc = self.models[model_key].model_preprocess.filter_pc(pointcloud)
         num_voxels = self.pc["voxels"].shape[0]
-        self.channel.request.ClearField(
+        self.models[model_key].endpoint.request.ClearField(
             "raw_input_contents"
         )  # Flush the previous sample content
-        for key, idx in zip(self.inputs, range(len(self.inputs))):
-            tmp_shape = self.inputs[key].shape
-            self.inputs[key].ClearField("shape")
+        for key, idx in zip(self.models[model_key].inputs, range(len(self.models[model_key].inputs))):
+            tmp_shape = self.models[model_key].inputs[key].shape
+            self.models[model_key].inputs[key].ClearField("shape")
             tmp_shape[0] = num_voxels
-            self.channel.request.inputs[idx].ClearField("shape")
-            self.channel.request.inputs[idx].shape.extend(tmp_shape)
-            self.inputs[key].shape.extend(tmp_shape)
+            self.models[model_key].endpoint.request.inputs[idx].ClearField("shape")
+            self.models[model_key].endpoint.request.inputs[idx].shape.extend(tmp_shape)
+            self.models[model_key].inputs[key].shape.extend(tmp_shape)
         # Insert batch dimensions into the voxel coordinates------>change from N x 3 to N x 3+1. Assume batch size 1
         tmp_data = np.zeros(
             (self.pc["voxel_coords"].shape[0], self.pc["voxel_coords"].shape[1] + 1),
@@ -307,40 +318,42 @@ class TritonInference:
         # Make sure the data types and shapes are correct for each input before sending them as bytes, this causes wrong array values on the server
         assert (
             self.pc["voxels"].dtype
-            == self.input_datatypes[self.inputs["input_0"].datatype]
+            == self.input_datatypes[self.models[model_key].inputs["input_0"].datatype]
         )
         assert (
             self.pc["voxel_coords"].dtype
-            == self.input_datatypes[self.inputs["input_1"].datatype]
+            == self.input_datatypes[self.models[model_key].inputs["input_1"].datatype]
         )
         assert (
             self.pc["voxel_num_points"].dtype
-            == self.input_datatypes[self.inputs["input_2"].datatype]
+            == self.input_datatypes[self.models[model_key].inputs["input_2"].datatype]
         )
-        self.channel.request.raw_input_contents.extend(
+        self.models[model_key].endpoint.request.raw_input_contents.extend(
             [
                 self.pc["voxels"].tobytes(),
                 self.pc["voxel_coords"].tobytes(),
                 self.pc["voxel_num_points"].tobytes(),
             ]
         )
-        self.channel.response = (
-            self.channel.do_inference()
+        self.models[model_key].endpoint.response = (
+            self.models[model_key].endpoint.do_inference()
         )  # perform the channel Inference
-        box_array, scores, labels = self.client_postprocess.extract_boxes(
-            self.channel.response
+        box_array, scores, labels = self.models[model_key].model_postprocess.extract_boxes(
+            self.models[model_key].endpoint.response
         )
         
         # Show only persons above given confidence threshold
-        indices = np.where((labels == filter_class_idx) & (scores > confidence))[0].tolist()
+        indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
 
         if self.visualize:
-            Visualizer.draw_scenes(
+            self.visualizer.draw_scenes(
                 points=self.pc["points"],
                 ref_boxes=box_array[indices, :],
                 ref_scores=scores[indices],
                 ref_labels=labels[indices],
             )
+            
+        return box_array[indices, :], scores[indices], labels[indices]
     
     def generate_datumaro_predictions(self, 
                                       data: list[dict], 
@@ -354,10 +367,15 @@ class TritonInference:
         """
         if self.modality == 'image':
             data_key = 'image'
-            infer_function = self.triton_infer_image  
+            infer_function = self.triton_infer_image 
+            datumaro_processor = DatumaroAnnotation(format=self.models[model_key].format) 
+            datumaro_converter = datumaro_processor.toCOCO
         elif self.modality == 'pointcloud':
-            data_key = 'pointcloud'
+            data_key = 'pointcloud_processed'
             infer_function = self.triton_infer_pointcloud
+            datumaro_processor = DatumaroAnnotation(format=self.models[model_key].format)
+            datumaro_converter = datumaro_processor.toKITTI
+            
         else:
             logger.error("Unsupported modality: {}".format(self.modality))
             sys.exit(1)
@@ -391,13 +409,11 @@ class TritonInference:
                     t4 = time.time()
                     infer_array[seerep_sample_idx] = t4 - t3
                     # traverse the predictions for the current image
-                    predictions['annotations'] = process_model_output(
-                                                                    sample=sample,
+                    predictions['annotations'] = datumaro_converter(sample=sample,
                                                                     model_output=pred,
                                                                     sample_idx=seerep_sample_idx,
                                                                     visualize=self.visualize,
                                                                     class_names=self.models[model_key].class_names)
-                            
                     data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
                 if self.visualize:
