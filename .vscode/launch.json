@@ -5,6 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": [
+                "/workspace/kittI_cvat_datumaro",
+                "/workspace/kittI_cvat_datumaro"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Infer 2D",
             "type": "debugpy",
             "request": "launch",
@@ -12,20 +23,25 @@
             "args": [
                 // "--channel-triton", "localhost:8001",
                 // "--channel-seerep", "localhost:9090",
-                "-cT", "10.249.6.30:8001",
-                "-cS", "agrigaia-ur.ni.dfki:9090",
+                "-cT",
+                "10.249.6.30:8001",
+                "-cS",
+                "agrigaia-ur.ni.dfki:9090",
                 // "--seerep-project", "aitf-triton-coco",
-                "--seerep-project", "Test_2023_06_22_2024-08-27-10-12-19_0.bag",
-                "--log-level", "info",
+                "--seerep-project",
+                "Test_2023_06_22_2024-08-27-10-12-19_0.bag",
+                "--log-level",
+                "info",
                 // "--visualize",
                 // "--model-name", "frcnn_800",
                 // "--model-name", "dino_coco_600",
-                "--model-name", "retinanet_coco",
+                "--model-name",
+                "retinanet_coco",
                 // "--model-name", "yolov5m_iso_onnx",
                 // "--model-name", "yolov5m_coco",
                 "--semantics",
                 // // "labelGeneral_sensors",
-                "person", 
+                "person",
                 // "apple",
                 // "Pedestrian",
                 // "Cyclist",
@@ -40,9 +56,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION": "python"
             },
-            
         },
         {
             "name": "Inference",
@@ -52,13 +67,11 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python",
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION": "python",
                 "PROJECT_ROOT": "${workspaceFolder}",
-                "XDG_RUNTIME_DIR":"/opt/client/.xdg"
+                "XDG_RUNTIME_DIR": "/opt/client/.xdg"
             },
-            
         },
-
         {
             "name": "Infer 3D",
             "type": "debugpy",
@@ -67,11 +80,16 @@
             "args": [
                 // "--channel-triton", "localhost:8001",
                 // "--channel-seerep", "localhost:9090",
-                "-cT", "10.249.6.30:8001",
-                "-cS", "10.249.3.19:9090",
-                "--seerep-project", "map",
-                "--model-name", "second_iou_kitti",
-                "--log-level", "info",
+                "-cT",
+                "10.249.6.30:8001",
+                "-cS",
+                "10.249.3.19:9090",
+                "--seerep-project",
+                "map",
+                "--model-name",
+                "second_iou_kitti",
+                "--log-level",
+                "info",
                 "--semantics",
                 "Source_Kitti",
                 // "Source_CoCo",
@@ -81,11 +99,10 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python",
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION": "python",
                 "PROJECT_ROOT": "${workspaceFolder}",
-                "XDG_RUNTIME_DIR":"/opt/client/.xdg"
+                "XDG_RUNTIME_DIR": "/opt/client/.xdg"
             },
-            
         },
         {
             "name": "Ros listen",
@@ -95,9 +112,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION":"python"
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION": "python"
             },
-            
         },
         {
             "name": "Demo pcdet",
@@ -107,11 +123,14 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--cfg_file","second_iou.yaml",
-                "--ckpt","second_iou_kitti.pth",
+                "--cfg_file",
+                "second_iou.yaml",
+                "--ckpt",
+                "second_iou_kitti.pth",
                 // "--cfg_file","PartA2_free.yaml",
                 // "--ckpt","PartA2_free_7872.pth",
-                "--data_path","000076.bin",
+                "--data_path",
+                "000076.bin",
             ]
         },
         {

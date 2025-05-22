@@ -13,8 +13,18 @@
 		"--runtime=nvidia",
 		"--net=host",
 		"--name=triton-client-dev",
-		"--ipc=host"
+		"--ipc=host",
+		"-e", "DISPLAY", // Forward the DISPLAY environment variable
+		"-e", "XAUTHORITY=/tmp/.Xauthority",
+        // "-v", "/tmp/.X11-unix:/tmp/.X11-unix", // Mount the X11 socket
+		"-v", "${localEnv:HOME}/.Xauthority:/tmp/.Xauthority"
 	],
+	"containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}"
+    },
+	"mounts": [
+        "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached"
+      ],
 	"customizations": {
 		"vscode": {
 			"extensions": [
