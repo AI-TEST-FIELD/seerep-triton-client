@@ -10,7 +10,7 @@ example_uuids = ['1957e21a-2f4f-40f5-b4de-b0a693fd7bc0',
                'f90f8e7c-1e08-4868-ad8d-a6f690ebca94']
 model_name = 'yolov5m_coco'
 seerep_endpoint = "localhost:9090"             
-triton_endpoint = "10.249.6.30:8001"
+triton_endpoint = "10.249.6.4:8001"
 
 triton_client  = TritonInference(
                                 model_name=model_name,

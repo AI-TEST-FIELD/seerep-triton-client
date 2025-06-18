@@ -14,7 +14,7 @@ class TritonEndpoint:
     def __init__(self,
                  model_name='yolov5m_coco',
                  model_version='1',
-                 endpoint_url='10.249.6.30:8001',
+                 endpoint_url='10.249.6.4:8001',
                  batch_size=1,
                  grpc_packet_size=17671546,
                  log_level='error'):
