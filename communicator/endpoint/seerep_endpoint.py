@@ -101,7 +101,6 @@ class SeerepEndpoint:
         self._builder = None
         self.endpoint_url = endpoint_url
         self.visualize = visualize
-
         # register and initialise the stub
         self.modality = modality
         self.intialize_gRPC_stubs()
@@ -114,13 +113,23 @@ class SeerepEndpoint:
             self.source_window = 'SEEREP source pointcloud'
             self.visualizer = Visualizer(origin=True)
         logger.info("SEEREP Channel initialized successfully via endpoint : {} ".format(self.endpoint_url))
+        # Set logger level based on log_level argument
+        log_level_map = {
+            'ERROR': logging.ERROR,
+            'INFO': logging.INFO,
+            'WARNING': logging.WARNING,
+        }
+        logger.setLevel(log_level_map.get(log_level.upper(), logging.ERROR))
 
     def register_grpc_channel(self):
         """
         Returns:
             A gRPC stub for the SEEREP server
         """
-        channel = grpc.insecure_channel(self.endpoint_url) 
+        channel = grpc.insecure_channel(self.endpoint_url,
+                                        options=[('grpc.max_message_length', -1),
+                                         ('grpc.max_send_message_length', -1),
+                                         ('grpc.max_receive_message_length', -1)])
         return channel
 
     def intialize_gRPC_stubs(self):
@@ -286,6 +295,7 @@ class SeerepEndpoint:
             sample['image'] = np.reshape(response.DataAsNumpy(), (response.Height(), response.Width(), -1))[:, :, 0:3] # When more than 3 channels
             sample['image'] = np.ascontiguousarray(sample['image'], dtype=np.uint8).astype(np.uint8)
             sample['timestamp'] = [response.Header().Stamp().Seconds(), response.Header().Stamp().Nanos()]  # seconds nanos
+            sample['project_uuid'] = response.Header().UuidProject().decode("utf-8")
             sample['processed'] = []
             sample['no_grountruth'] = False
             sample['annotations'] = {
@@ -314,14 +324,14 @@ class SeerepEndpoint:
                             )
                         )
             # This condition makes sure we do not predict the labels twice and send them back AGAIN!!! to SEEREP
-            
             # Check which entries in model_name are present in the labels and add them to 'processed'
             if isinstance(model_name, list):
                 sample['processed'] = [name for name in model_name if name in sample['annotations']['categories']['label']['labels']]
             else:
                 if model_name in sample['annotations']['categories']['label']['labels']:
                     sample['processed'].append(model_name)
-            if len(sample['annotations']['items'][0]['annotations']) == 0:
+            # DEBUG
+            if len(sample['annotations']['items']) == 0:
                 sample['no_grountruth'] = True
             data.append(sample.copy())
         logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
@@ -776,15 +786,24 @@ class SeerepEndpoint:
         return data
     
     # TODO Send dataset should also be on project or data UUID basis. Out of date.
-    def send_dataset(self, data: list[dict], uuids: list[str], category: str='yolov5m_coco'):
+    def send_dataset(self, 
+                     data: list[dict], 
+                     uuids: list[str], 
+                     category: str='yolov5m_coco', 
+                     ignore_ground_truth: bool=False):
         """
             Send the previously fetched SEEREP dataset augmented with Datumaro annotations
-            using model from triton server under the name category
-
+            using model from triton server under the name category. If ignore_ground_truth is set to True,
+            then the predictions will be sent as ground truth annotations. If set to False, then the
+            predictions will be sent only if there are ground truth annotations present in the data sample.
+            
             Args:
                 data (list[dict]): List of dictionaries containing the data samples with ['annotations']
                 uuids (list[str]): List of UUIDs of the data samples
                 category (str): The name of the model used for predictions
+                ignore_ground_truth (bool): If True, detections will be sent even if there are no ground truth annotations.
+                                            This can lead to scenario where false positives will be evaluated against ground truth.
+                                            If False, detections will be sent only if there are ground truth annotations present.
             Returns:
                 str: The UUID of the created SEEREP project.
             """
@@ -799,9 +818,8 @@ class SeerepEndpoint:
         buffer = builder.Output()
         response_ls: List = list(image_stub.GetImage(bytes(buffer)))
         if not response_ls:
-            print("""
-                No images found. Please create a project with labeled images
-                using gRPC_pb_sendLabeledImage.py first.
+            logger.error("""
+                No samples found. Check if the provided UUIDs in the createQuery are correct. 
             """)
             sys.exit()
         msgToSend = []
@@ -812,50 +830,87 @@ class SeerepEndpoint:
                                 desc="Sending Predictions to SEEREP Server:",
                                 unit="predictions"
                                 ):
-
             response = Image.Image.GetRootAs(responseBuf)
+            # Fetch the image UUID from the response that we have already previously fetched for inference
             img_uuid = response.Header().UuidMsgs().decode("utf-8")
             labels = []
+            # Match the image UUID with the data sample which were inferenced from previous fetch. 
             anns = [sample for sample in data if sample['uuid']==img_uuid][0]
-            category_groundtruth_index = anns['annotations']['categories']['label']['labels'].index('groundtruth')
-            # No objects exist in the current image according to ground truth
-            if len(anns['annotations']['items'][category_groundtruth_index]['annotations']) == 0:
-                pass    # TODO what if no ground truth but the box was detected?
-            # There are gt annotations in the image
-            else:
-                # Ground truth exists AND predicted as well already from a previous run
-                if anns['processed'] == True:
-                    pass
-                # Ground truth exists AND predicted in the current run and will be sent back to SEEREP
+            if ignore_ground_truth:
+                logger.warning("Model predictions will be sent as Ground truth since ignore_ground_truth is set to True")
+                if len(anns['annotations']['items']) > 0:
+                    for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
+                        labels.append(create_label(builder=builder,
+                                                    label='person',
+                                                    label_id=int(prediction['label_id']),
+                                                    instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                    instance_id=int(prediction['id'])
+                                                    ))
+                    labelsCategory = []
+                    labelsCategory.append(create_label_category(
+                                                builder=builder,
+                                                labels=labels,
+                                                datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
+                                                category=category)) 
+                    dataset_uuid_label = create_dataset_uuid_label(builder=builder,
+                                                                    projectUuid=anns['project_uuid'],
+                                                                    datasetUuid=img_uuid,
+                                                                    labels=labelsCategory)
+                    builder.Finish(dataset_uuid_label)
+                    buf = builder.Output()
+                    label_list.append((img_uuid,buf))
+                    msgToSend.append(bytes(buf))
+                # Ground truth found but no predictions were generated by the model aka 'category'
                 else:
-                    if len(anns['annotations']['items']) > 1:
-                        # category_model_index = anns['annotations']['categories']['label']['labels'].index(category)
-                        for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
-                            labels.append(create_label(builder=builder,
-                                                        label='person',
-                                                        label_id=int(prediction['label_id']),
-                                                        instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
-                                                        instance_id=int(prediction['id'])
-                                                        ))
-                        labelsCategory = []
-                        labelsCategory.append(create_label_category(
-                                                    builder=builder,
-                                                    labels=labels,
-                                                    datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
-                                                    category=category))  # TODO Fetch this dynamically with model_name
-                        dataset_uuid_label = create_dataset_uuid_label(builder=builder,
-                                                                        projectUuid=projectid,
-                                                                        datasetUuid=img_uuid,
-                                                                        labels=labelsCategory)
-                        builder.Finish(dataset_uuid_label)
-                        buf = builder.Output()
-                        label_list.append((img_uuid,buf))
-                        msgToSend.append(bytes(buf))
-                    # Ground truth found but no predictions were generated by the model aka 'category'
+                    pass
+            else:
+                if anns['no_grountruth']:
+                    print("No ground truth annotations found for image with UUID: {}".format(img_uuid))
+                else:
+                    category_groundtruth_index = anns['annotations']['categories']['label']['labels'].index('groundtruth')
+                    # No objects exist in the current image according to ground truth
+                    if len(anns['annotations']['items'][category_groundtruth_index]['annotations']) == 0:
+                        pass    # TODO what if no ground truth but the box was detected?
+                    # There are gt annotations in the image
                     else:
-                        pass
-        image_stub.AddLabels(iter(msgToSend))
-        return label_list
+                        # Ground truth exists AND predicted already from a previous run --> DONT SEND TO SEEREP
+                        if category in anns['processed']:
+                            logger.info("Skipping image with UUID: {} as predictions were already sent to SEEREP in previous requests".format(img_uuid))
+                            pass
+                        # Ground truth exists AND predicted in the current run --> SEND DATA TO SEEREP
+                        else:
+                            if len(anns['annotations']['items']) > 0:
+                                for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
+                                    labels.append(create_label(builder=builder,
+                                                                label='person',
+                                                                label_id=int(prediction['label_id']),
+                                                                instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                                instance_id=int(prediction['id'])
+                                                                ))
+                                labelsCategory = []
+                                labelsCategory.append(create_label_category(
+                                                            builder=builder,
+                                                            labels=labels,
+                                                            datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
+                                                            category=category)) 
+                                dataset_uuid_label = create_dataset_uuid_label(builder=builder,
+                                                                                projectUuid=anns['project_uuid'],
+                                                                                datasetUuid=img_uuid,
+                                                                                labels=labelsCategory)
+                                builder.Finish(dataset_uuid_label)
+                                buf = builder.Output()
+                                label_list.append((img_uuid,buf))
+                                msgToSend.append(bytes(buf))
+                            # Ground truth found but no predictions were generated by the model aka 'category'
+                            else:
+                                logger.info("Skipping image with UUID: {} since no predictions were generated by the current model {}".format(img_uuid, category))
+                                pass
+        try:
+            image_stub.AddLabels(iter(msgToSend))
+        except grpc.RpcError as e:
+            logger.error(f"Failed to send labels to SEEREP server: {e}")
+            return None
+        return True
 
 
 def main():
