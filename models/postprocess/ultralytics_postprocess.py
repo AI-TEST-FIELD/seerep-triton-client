@@ -7,6 +7,8 @@ import torch
 import torchvision
 from .base_postprocess import Postprocess
 
+import os
+
 class Ultralytics_postprocess(Postprocess):
 
     def __init__(self):
@@ -16,10 +18,11 @@ class Ultralytics_postprocess(Postprocess):
         pass
 
     def load_class_names(self, dataset='COCO'):
+        dirname = os.path.dirname(__file__)
         if dataset=='COCO':
-            namesfile = './config/coco.names'
+            namesfile = os.path.join(dirname, '../../config/coco.names')
         elif dataset=='CROP':
-            namesfile='./config/crop.names'
+            namesfile = os.path.join(dirname, '../../config/crop.names')
         elif dataset=='ISO':
             namesfile='./config/aitf.names'
         else:

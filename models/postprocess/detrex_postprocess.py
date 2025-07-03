@@ -2,6 +2,8 @@ import sys
 import numpy as np
 from .base_postprocess import Postprocess
 
+import os
+
 class Detrex_postprocess(Postprocess):
     def __init__(self):
         pass
@@ -10,10 +12,11 @@ class Detrex_postprocess(Postprocess):
         pass
 
     def load_class_names(self, dataset='COCO'):
+        dirname = os.path.dirname(__file__)
         if dataset=='COCO':
-            namesfile = './config/coco.names'
+            namesfile = os.path.join(dirname, '../../config/coco.names')
         elif dataset=='CROP':
-            namesfile='./config/crop.names'
+            namesfile = os.path.join(dirname, '../../config/crop.names')
         else:
             print('[ERROR] No valid dataset was provided. Exiting!')
             sys.exit(0)
