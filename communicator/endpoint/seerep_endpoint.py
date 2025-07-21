@@ -7,6 +7,7 @@ import grpc
 import open3d as o3d
 import flatbuffers
 import tritonclient.grpc.model_config_pb2 as mc
+import itertools
 from typing import List, Tuple, Set
 # import uuid
 import cv2
@@ -157,7 +158,15 @@ class SeerepEndpoint:
          seerep.robot.10.249.3.13.nip.io:32141
         """
         grpc_channel = self.register_grpc_channel()
-        grpc_stub  = imageService.ImageServiceStub(grpc_channel)
+        if self.modality == 'image':
+            grpc_stub  = imageService.ImageServiceStub(grpc_channel)
+        elif self.modality == 'pointcloud':
+            grpc_stub  = pointCloudService.PointCloudServiceStub(grpc_channel)
+        else:
+            logger.error(
+                "Modality not supported. Please use image or pointcloud. \n"+ 
+                "Cannot create secondary channel for target modality {}".format(self.modality))
+            sys.exit(0)
         grpc_stubmeta = metaOperations.MetaOperationsStub(grpc_channel)
         builder = self.init_builder()
 
@@ -273,21 +282,30 @@ class SeerepEndpoint:
             logger.error("Modality not supported. Please use image or pointcloud")
             sys.exit(0)
     
-    def process_images(self, buffer, model_name, num_samples:int=10)->dict:
+    def process_images(self, buffer, model_name, num_samples:int=None)->dict:
         '''
         buffer: flatbuffer buffer containing the query message 
         generated using the SEEREP createQuery function
         model_name: name of the model for which the predictions are to be generated.
+        num_samples: [DEBUG ONLY] number of samples to fetch from the SEEREP server.
         Returns a list of dictionaries containing the data samples with the following
         keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
         '''
         data = []
         data_generator = self._grpc_stub.GetImage(bytes(buffer))
-        for responseBuf in tqdm(data_generator,
-                                total=num_samples, 
-                                desc="Fetching images from the SEEREP server",
-                                colour="blue", 
-                                unit=" image(s)"):
+        # Limit the generator if num_samples is provided
+        if num_samples is not None:
+            data_generator = itertools.islice(data_generator, 1600, 1600+num_samples)
+        
+        # Set tqdm total only if num_samples is provided
+        tqdm_kwargs = {
+            "desc": "Fetching images from the SEEREP server",
+            "colour": "blue",
+            "unit": " image(s)"
+        }
+        if num_samples is not None:
+            tqdm_kwargs["total"] = num_samples
+        for responseBuf in tqdm(data_generator, **tqdm_kwargs):
             sample = {}
             response = Image.Image.GetRootAs(responseBuf)
             msguuid = response.Header().UuidMsgs().decode("utf-8")
@@ -334,6 +352,7 @@ class SeerepEndpoint:
             if len(sample['annotations']['items']) == 0:
                 sample['no_grountruth'] = True
             data.append(sample.copy())
+            sample = {}  # flush the sample data for new incoming samples
         logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
         return data
     
@@ -437,9 +456,9 @@ class SeerepEndpoint:
             else:
                 if model_name in sample['annotations']['categories']['label']['labels']:
                     sample['processed'].append(model_name)
-            # if len(sample['annotations']['items'][0]['annotations']) == 0:
-            #     sample['no_grountruth'] = True  
-            # Store the sample into data collection
+            # DEBUG
+            if len(sample['annotations']['items']) == 0:
+                sample['no_grountruth'] = True
             data.append(sample.copy())
             # flush the sample data for new incoming samples
             sample={}    
@@ -496,10 +515,14 @@ class SeerepEndpoint:
         buffer = self._builder.Output()
         return self.process_uuids(buffer)
     
-    def fetch_data_by_project(self, project_uuids: list[str], model_name: str)->dict:
+    def fetch_data_by_project(self, project_uuids: list[str], model_name: str, num_samples:int=None)->dict:
         '''
         Fetches data from SEEREP server based on the project_uuids. It also checks if the predictions for the model_name
         have already been generated for the data samples. If yes, then sets 'processed' flag to True.
+        Args:
+        project_uuids: list of project UUIDs to fetch data from.
+        model_name: name of the model for which the predictions are to be generated.
+        num_samples: [DEBUG ONLY] number of samples to fetch from the SEEREP server
         Returns a list of dictionaries containing the data samples with the following
         keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
         '''
@@ -517,7 +540,7 @@ class SeerepEndpoint:
         )
         self._builder.Finish(queryMsg)
         buffer = self._builder.Output()
-        return self.process_images(buffer, model_name=model_name)
+        return self.process_images(buffer, model_name=model_name, num_samples=num_samples)
 
     # TODO Can this be related to AGROVOC?
     def annotation_dict(self, format='aitf'):
@@ -807,7 +830,7 @@ class SeerepEndpoint:
             Returns:
                 str: The UUID of the created SEEREP project.
             """
-        image_stub, _, builder = self.secondary_channel()
+        data_stub, _, builder = self.secondary_channel()
         query = util_fb.createQuery(
                             builder,
                             dataUuids=uuids,
@@ -816,7 +839,13 @@ class SeerepEndpoint:
                         )
         builder.Finish(query)
         buffer = builder.Output()
-        response_ls: List = list(image_stub.GetImage(bytes(buffer)))
+        if self.modality == 'image':
+            response_ls: List = list(data_stub.GetImage(bytes(buffer)))
+        elif self.modality == 'pointcloud':
+            response_ls: List = list(data_stub.GetPointCloud2(bytes(buffer)))
+        else:
+            logger.error("Cannot create a response buffer for target modality: {}".format(self.modality))
+            sys.exit(0)
         if not response_ls:
             logger.error("""
                 No samples found. Check if the provided UUIDs in the createQuery are correct. 
@@ -836,6 +865,8 @@ class SeerepEndpoint:
             labels = []
             # Match the image UUID with the data sample which were inferenced from previous fetch. 
             anns = [sample for sample in data if sample['uuid']==img_uuid][0]
+            # This ignore_ground_truth flag is only to be used to send dummy predictions to SEEREP server as ground truth annotations. 
+            # DEBUG_ONLY
             if ignore_ground_truth:
                 logger.warning("Model predictions will be sent as Ground truth since ignore_ground_truth is set to True")
                 if len(anns['annotations']['items']) > 0:
@@ -862,54 +893,66 @@ class SeerepEndpoint:
                     msgToSend.append(bytes(buf))
                 # Ground truth found but no predictions were generated by the model aka 'category'
                 else:
-                    pass
+                    logger.info("Skipping image with UUID: {} since no predictions were generated by the current model {}".format(img_uuid, category))
             else:
-                if anns['no_grountruth']:
-                    print("No ground truth annotations found for image with UUID: {}".format(img_uuid))
+                # Predicted and sent to SEEREP already from a previous run --> DONT SEND TO SEEREP
+                if category in anns['processed']:
+                    logger.info("Skipping image with UUID: {}. Already processed by Model: {} from previous requests".format(img_uuid, category))
+                    pass
+                # Not predicted and not sent to SEEREP --> SEND DATA TO SEEREP
                 else:
-                    category_groundtruth_index = anns['annotations']['categories']['label']['labels'].index('groundtruth')
-                    # No objects exist in the current image according to ground truth
-                    if len(anns['annotations']['items'][category_groundtruth_index]['annotations']) == 0:
-                        pass    # TODO what if no ground truth but the box was detected?
-                    # There are gt annotations in the image
+                    if len(anns['annotations']['items'][-1]['annotations']) > 0:
+                        for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
+                            labels.append(create_label(builder=builder,
+                                                        label='person',
+                                                        label_id=int(prediction['label_id']),
+                                                        instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                        instance_id=int(prediction['id'])
+                                                        ))
+                        labelsCategory = []
+                        labelsCategory.append(create_label_category(
+                                                    builder=builder,
+                                                    labels=labels,
+                                                    datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
+                                                    category=category)) 
+                        dataset_uuid_label = create_dataset_uuid_label(builder=builder,
+                                                                        projectUuid=anns['project_uuid'],
+                                                                        datasetUuid=img_uuid,
+                                                                        labels=labelsCategory)
+                        builder.Finish(dataset_uuid_label)
+                        buf = builder.Output()
+                        label_list.append((img_uuid,buf))
+                        msgToSend.append(bytes(buf))
                     else:
-                        # Ground truth exists AND predicted already from a previous run --> DONT SEND TO SEEREP
-                        if category in anns['processed']:
-                            logger.info("Skipping image with UUID: {} as predictions were already sent to SEEREP in previous requests".format(img_uuid))
-                            pass
-                        # Ground truth exists AND predicted in the current run --> SEND DATA TO SEEREP
-                        else:
-                            if len(anns['annotations']['items']) > 0:
-                                for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
-                                    labels.append(create_label(builder=builder,
-                                                                label='person',
-                                                                label_id=int(prediction['label_id']),
-                                                                instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
-                                                                instance_id=int(prediction['id'])
-                                                                ))
-                                labelsCategory = []
-                                labelsCategory.append(create_label_category(
-                                                            builder=builder,
-                                                            labels=labels,
-                                                            datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
-                                                            category=category)) 
-                                dataset_uuid_label = create_dataset_uuid_label(builder=builder,
-                                                                                projectUuid=anns['project_uuid'],
-                                                                                datasetUuid=img_uuid,
-                                                                                labels=labelsCategory)
-                                builder.Finish(dataset_uuid_label)
-                                buf = builder.Output()
-                                label_list.append((img_uuid,buf))
-                                msgToSend.append(bytes(buf))
-                            # Ground truth found but no predictions were generated by the model aka 'category'
-                            else:
-                                logger.info("Skipping image with UUID: {} since no predictions were generated by the current model {}".format(img_uuid, category))
-                                pass
+                        logger.info("Generating dummy predictions since nothing detected by the current model {}".format(img_uuid, category))
+                        labels.append(create_label(builder=builder,
+                                                        label='person',
+                                                        label_id=int(1000),
+                                                        instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                        instance_id=int(1000),
+                                                        ))
+                        labelsCategory = []
+                        labelsCategory.append(create_label_category(
+                                                    builder=builder,
+                                                    labels=labels,
+                                                    datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
+                                                    category=category)) 
+                        dataset_uuid_label = create_dataset_uuid_label(builder=builder,
+                                                                        projectUuid=anns['project_uuid'],
+                                                                        datasetUuid=img_uuid,
+                                                                        labels=labelsCategory)
+                        builder.Finish(dataset_uuid_label)
+                        buf = builder.Output()
+                        label_list.append((img_uuid,buf))
+                        msgToSend.append(bytes(buf))
         try:
-            image_stub.AddLabels(iter(msgToSend))
+            if len(msgToSend) != 0:
+                data_stub.AddLabels(iter(msgToSend))
+            else:
+                logger.warning("No predictions to send to SEEREP server. Skipping...")
         except grpc.RpcError as e:
             logger.error(f"Failed to send labels to SEEREP server: {e}")
-            return None
+            return False
         return True
 
 
