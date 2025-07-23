@@ -33,9 +33,9 @@ def scale_boxes(box, normalized=False):
             )
 
         return [xtl, ytl, xbr, ybr]
-    
-def scale_box_array(box, 
-                    model_input_dim=(512, 512), 
+
+def scale_box_array(box,
+                    model_input_dim=(512, 512),
                     image_dim=(640, 480),
                     padded=False):
         """
@@ -68,7 +68,7 @@ def scale_box_array(box,
         ytl = np.reshape(ytl, (len(ytl), 1))
         ybr = np.reshape(ybr, (len(ybr), 1))
         return np.concatenate((xtl, ytl, xbr, ybr, box[:, 4:6]), axis=1)
-    
+
 def resize(image, input_metadata: list[dict]):
     """_summary_
 
@@ -102,10 +102,10 @@ def resize(image, input_metadata: list[dict]):
     # cv2.waitKey()
     # cv2.destroyWindow(named_window)
     return padded_image, cv_image.shape[0], cv_image.shape[1]
-    
-def visualize(sample: dict, 
-            cv_window_name: str, 
-            class_names: list, 
+
+def visualize(sample: dict,
+            cv_window_name: str,
+            class_names: list,
             new_model_key: False,
             model_name=None,
             ):
@@ -117,8 +117,8 @@ def visualize(sample: dict,
     sample: dict: The sample dictionary containing the image and annotations in datumaro format.
     cv_window_name: str: The name of the window to display the image.
     class_names: list: The list of class names.
-    new_model_key: bool: The flag to indicate if the model predictions are new or not compared to SEEREP version. 
-    model_name: str: The name of the model to fetch the annotations from the sample dictionary based on Triton model name stored in SEEREP. 
+    new_model_key: bool: The flag to indicate if the model predictions are new or not compared to SEEREP version.
+    model_name: str: The name of the model to fetch the annotations from the sample dictionary based on Triton model name stored in SEEREP.
     """
     if new_model_key:
         model_index = -1
@@ -130,23 +130,23 @@ def visualize(sample: dict,
         bbox = ann['bbox']
         bbox = cxcy2xyxy(bbox)
         label = int(ann['id'])
-        cv2.rectangle(sample['image'], 
-                        (bbox[0], bbox[1]), 
-                        (bbox[2], bbox[3]), 
+        cv2.rectangle(sample['image'],
+                        (bbox[0], bbox[1]),
+                        (bbox[2], bbox[3]),
                         color3, 2)
         (tw, th), _ = cv2.getTextSize(class_names[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-        cv2.rectangle(sample['image'], 
-                        (bbox[0], bbox[1] - 25), 
-                        (bbox[0] + tw, bbox[1]), 
+        cv2.rectangle(sample['image'],
+                        (bbox[0], bbox[1] - 25),
+                        (bbox[0] + tw, bbox[1]),
                         color3, -1)
-        cv2.putText(sample['image'], 
-                    class_names[label], 
-                    (bbox[0], bbox[1] - 5), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
+        cv2.putText(sample['image'],
+                    class_names[label],
+                    (bbox[0], bbox[1] - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
                     0.9, (255,255,255), 2)
     cv2.imshow(cv_window_name, sample['image'])
-    cv2.waitKey() 
-    
+    cv2.waitKey()
+
 class DatumaroAnnotation:
     """
     This class is used to create a datumaro annotation object.
@@ -154,17 +154,17 @@ class DatumaroAnnotation:
     The annotation object is used to create a datumaro dataset.
     """
 
-    def __init__(self, 
+    def __init__(self,
                  format: str,
                 #  categories: list
                  ):
         self.format = format
         self.annotations = []
-        
-    def toCOCO(self, 
+
+    def toCOCO(self,
             sample,
-            model_output, 
-            sample_idx, 
+            model_output,
+            sample_idx,
             visualize=False,
             class_names=None):
         predictions = []
@@ -180,9 +180,14 @@ class DatumaroAnnotation:
             for obj in range(len(model_output[1])):
                 start_cord, end_cord = (model_output[0][obj, 0], model_output[0][obj, 1]), \
                                     (model_output[0][obj, 2], model_output[0][obj, 3])
+                # Datumaro notation:
+                # Bbox annotation class. This class represents a bounding box
+                # defined by its top-left corner (x, y) and its width and
+                # height (w, h).
+                # https://github.com/open-edge-platform/datumaro/blob/35a319c470f53f2a5eea7521cde24dcbc828b50a/src/datumaro/components/annotation.py#L1020
                 x, y, w, h = (
-                    np.round((start_cord[0] + end_cord[0]) / 2, 2),
-                    np.round((start_cord[1] + end_cord[1]) / 2, 2),
+                    np.round(start_cord[0], 2),
+                    np.round(start_cord[1], 2),
                     np.round(end_cord[0] - start_cord[0], 2),
                     np.round(end_cord[1] - start_cord[1], 2),
                 )
@@ -199,7 +204,7 @@ class DatumaroAnnotation:
                     'label_id':'',
                     'score':1,
                 }
-        
+
                 # Visualize the predictions generated by triton inference
                 if visualize:
                     label = class_names[int(model_output[1][obj])]
@@ -239,11 +244,11 @@ class DatumaroAnnotation:
                         2,
                     )
         return predictions
-    
-    def toKITTI(self, 
+
+    def toKITTI(self,
                 sample,
-                model_output, 
-                sample_idx, 
+                model_output,
+                sample_idx,
                 visualize=False,
                 class_names=None):
         """
@@ -254,14 +259,14 @@ class DatumaroAnnotation:
                 'id':'1',   # Normally this is the PC file name but here we use the sample uuid
                 'type': "cuboid_3d",
                 "attributes": {"occluded": False},
-                "group": 0, 
+                "group": 0,
                 'label_id':0, # unique id for each object instance
                 'score':1,  # confidence score
                 "position": [], # center of the cuboid x,y,z
                 "rotation": [], # rotation of the cuboid in radian w.r.t the x,y,z axis
                 "scale": [], # w,h,l
                 }
-        
+
         if len(model_output[1]) == 0:
             pass
         else:
@@ -273,18 +278,18 @@ class DatumaroAnnotation:
                 tmp['rotation'] = np.array([0, 0, model_output[0][obj, 6] + 1e-10])
                 tmp['score'] = model_output[1][obj]
                 tmp['id'] = sample['uuid']
-                predictions.append(tmp)  
+                predictions.append(tmp)
             return predictions
-        
-        
+
+
 # DEPRECATED
 def process_model_output(sample,
-                         model_output, 
-                         sample_idx, 
+                         model_output,
+                         sample_idx,
                          visualize=False,
                          class_names=None):
     """
-    
+
     """
     predictions = []
     tmp = {
