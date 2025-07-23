@@ -294,8 +294,8 @@ class SeerepEndpoint:
         data = []
         data_generator = self._grpc_stub.GetImage(bytes(buffer))
         # Limit the generator if num_samples is provided
-        if num_samples is not None:
-            data_generator = itertools.islice(data_generator, 1600, 1600+num_samples)
+        # if num_samples is not None:
+        #     data_generator = itertools.islice(data_generator, 1600, 1600+num_samples)
         
         # Set tqdm total only if num_samples is provided
         tqdm_kwargs = {
