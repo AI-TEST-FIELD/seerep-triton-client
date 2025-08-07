@@ -34,7 +34,6 @@ class Model(ABC):
         input_config = model_config.input[0]
         output_metadata = [output for output in model_metadata.outputs]
         input_batch_dim = (model_config.max_batch_size > 0)
-        input_batch_dim = False
         expected_input_dims = 3 + (1 if input_batch_dim else 0)
         if len(input_metadata.shape) != expected_input_dims:
             raise Exception(

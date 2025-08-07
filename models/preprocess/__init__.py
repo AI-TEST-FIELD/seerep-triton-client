@@ -3,3 +3,4 @@ from .ultralytics_preprocess import Ultralytics_preprocess
 from .detectron_preprocess import Detectron2_preprocess
 from .detrex_preprocess import Detrex_preprocess
 from .openpcdet_preprocess import OpenPCDet_preprocess
+from .mmdet_preprocess import MMDet_preprocess

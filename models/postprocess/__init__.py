@@ -3,3 +3,4 @@ from .ultralytics_postprocess import Ultralytics_postprocess
 from .detectron_postprocess import Detectron2_postprocess
 from .detrex_postprocess import Detrex_postprocess
 from .openpcdet_postprocess import OpenPCDet_postprocess
+from .mmdet_postprocess import MMDet_postprocess
