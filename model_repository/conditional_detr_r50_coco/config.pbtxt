@@ -1,4 +1,4 @@
-name: "rtmdet_coco"
+name: "conditional_detr_r50_coco"
 backend: "python"
 max_batch_size : 2
 input [

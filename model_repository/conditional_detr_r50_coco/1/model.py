@@ -3,18 +3,24 @@ import json
 import numpy as np
 from pathlib import Path
 import warnings
-# MMDetection imports
-from mmdet.apis import DetInferencer
-import triton_python_backend_utils as pb_utils
 warnings.filterwarnings("ignore", category=FutureWarning, module="mmengine")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="mmengine")
 warnings.filterwarnings("ignore", category=UserWarning, module="mmengine")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="torch")
-'''
-    RTM DeTR model via MMDet stack
-    RTMDet: An Empirical Study of Designing Real-Time Object Detectors
-    https://arxiv.org/abs/2212.07784
-'''
+# from typing import Optional, Union, Dict, Any
+
+# MMDetection imports
+# from mmcv.transforms import Compose
+# from mmengine.config import Config
+from mmdet.apis import DetInferencer
+# from mmdet.evaluation import get_classes
+# from mmdet.utils import get_test_pipeline_cfg
+# from mmdet.structures import DetDataSample
+
+# triton_python_backend_utils is available in every Triton Python model
+import triton_python_backend_utils as pb_utils
+
+
 class TritonPythonModel:
     """
     Triton Python model for MMDetection inference.
@@ -41,8 +47,7 @@ class TritonPythonModel:
         """Initialize the detection model."""
         # Load config
         self.folder_path = Path(__file__).parent
-        self.mmseg_config = 'rtmdet_l_swin_b_p6_4xb16-100e_coco'
-        # self.model_path = osp.join(self.folder_path, 'rtmdet_l_swin_b_p6_4xb16-100e_coco-a1486b6f.pth')
+        self.mmseg_config = 'conditional-detr_r50_8xb2-50e_coco'
         self.model_config = model_config = json.loads(args['model_config'])
 
         # Get output configurations
@@ -136,7 +141,9 @@ class TritonPythonModel:
                     # num_detections_tensor
                 ]
             )
+                
             responses.append(inference_response)
+            print('Length of inference response:', len(responses))
 
         return responses
 

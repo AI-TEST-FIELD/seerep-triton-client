@@ -1,4 +1,4 @@
-name: "rtmdet_coco"
+name: "crowdhuman_r_50_coco"
 backend: "python"
 max_batch_size : 2
 input [

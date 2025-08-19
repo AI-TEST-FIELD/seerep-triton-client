@@ -1,4 +1,4 @@
-name: "rtmdet_coco"
+name: "grounding_dino_b_swin_coco"
 backend: "python"
 max_batch_size : 2
 input [

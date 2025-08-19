@@ -1,4 +1,4 @@
-name: "rtmdet_coco"
+name: "faster_rcnn_r_50_person_coco"
 backend: "python"
 max_batch_size : 2
 input [
