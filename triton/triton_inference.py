@@ -10,6 +10,7 @@ from communicator.endpoint import SeerepEndpoint, TritonEndpoint
 from models.base_model import Model
 # from models.postprocess import Postprocess
 from logger import Client_logger, TqdmToLogger
+from models.mmdet import MMDet
 from visual_utils import Visualizer
 from utils import (
     resize,
@@ -28,6 +29,8 @@ class ModelData:
         self.model_preprocess = model_preprocess
         self.model_postprocess = model_postprocess
         self.model_name = model.model_name
+        self.dynamic = False
+        self.batching_supported = False
         
     def init_endpoint(self, endpoint_url: str, log_level: str="info"):
         """
@@ -62,7 +65,6 @@ class ModelData:
         """
         Fetch the model metadata and initialize the model input and output tensors
         on the client side from the gRPC endpoint of Triton server.
-        Rest API is not supported. 
         """
         self.meta_data = self.endpoint.get_metadata()
         self.input_metadata, self.output_metadata = self.model.parse_model(
@@ -71,27 +73,41 @@ class ModelData:
         self.endpoint.input = [input["name"] for input in self.input_metadata]
         self.endpoint.output = [output["name"] for output in self.output_metadata]
 
+        # Check if model supports batching
+        max_batch_size = self.meta_data["config_response"].config.max_batch_size
+        self.batching_supported = max_batch_size > 0
+        self.max_batch_size = max_batch_size if self.batching_supported else 1
+
         self.inputs = {}
         for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
-            self.inputs[
-                "input_{}".format(i)
-            ] = service_pb2.ModelInferRequest().InferInputTensor()
-            self.inputs["input_{}".format(i)].name = input["name"]
-            self.inputs["input_{}".format(i)].datatype = input["dtype"]
-            if -1 in input["shape"]:
-                input["shape"][0] = 10000  # tmp
-            self.inputs["input_{}".format(i)].shape.extend(input["shape"])
-            # assign the gathered model inputs to the grpc channel
-            self.endpoint.request.inputs.extend([self.inputs["input_{}".format(i)]])
+            self.inputs[f"input_{i}"] = service_pb2.ModelInferRequest().InferInputTensor()
+            self.inputs[f"input_{i}"].name = input["name"]
+            self.inputs[f"input_{i}"].datatype = input["dtype"]
+            
+            # DON'T set the shape here for batching models!
+            # The shape will be set dynamically in triton_infer_image()
+            # based on the actual input data
+            
+            # Only set shape for non-batching models
+            if not self.batching_supported:
+                if -1 in input["shape"]:
+                    # Handle dynamic dimensions properly
+                    shape_to_set = input["shape"].copy()
+                    # You might want to set reasonable defaults or leave as -1
+                else:
+                    shape_to_set = input["shape"]
+                self.inputs[f"input_{i}"].shape.extend(shape_to_set)
+                self.endpoint.request.inputs.extend([self.inputs[f"input_{i}"]])
+
+        # Check for dynamic shapes
+        if any(-1 in input["shape"] for input in self.input_metadata):
+            self.dynamic = True
 
         self.outputs = {}
         for output, i in zip(self.output_metadata, range(len(self.output_metadata))):
-            self.outputs[
-                "output_{}".format(i)
-            ] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
-            self.outputs["output_{}".format(i)].name = output["name"]
-            # assign the gathered model outputs to the grpc channel
-            self.endpoint.request.outputs.extend([self.outputs["output_{}".format(i)]])
+            self.outputs[f"output_{i}"] = service_pb2.ModelInferRequest().InferRequestedOutputTensor()
+            self.outputs[f"output_{i}"].name = output["name"]
+            self.endpoint.request.outputs.extend([self.outputs[f"output_{i}"]])
 
 class TritonInference:
     def __init__(self, 
@@ -147,6 +163,7 @@ class TritonInference:
                     'fcos_coco':Detectron2_Det,
                     'frcnn_800_coco':Detectron2_Det,
                     'retinanet_coco':Detectron2_Det,
+                    'rtmdet_coco':MMDet, 
                 }
             except ImportError as e:
                 logger.error(f"Error importing models for image modality: {e}")
@@ -251,8 +268,11 @@ class TritonInference:
         """
         self.orig_image = cv_image.copy()
         original_h, original_w = cv_image.shape[0], cv_image.shape[1]
-        cv_image, model_input_h, model_input_w = resize(cv_image, 
-                                                        self.models[model_key].input_metadata)
+        if self.models[model_key].dynamic:
+            model_input_h, model_input_w = original_h, original_w
+        else:
+            cv_image, model_input_h, model_input_w = resize(cv_image, 
+                                                            self.models[model_key].input_metadata)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
         # cv2.waitKey(0)
@@ -265,25 +285,37 @@ class TritonInference:
             self.input_datatypes[self.models[model_key].input_metadata[0]['dtype']]
         )
         if self.image is not None:
+            # Clear previous request data
             self.models[model_key].endpoint.request.ClearField("inputs")
-            self.models[model_key].endpoint.request.ClearField("raw_input_contents")  # Flush the previous image contents
-            self.models[model_key].endpoint.request.inputs.extend(
-                [self.models[model_key].inputs['input_0']])
-            self.models[model_key].endpoint.request.raw_input_contents.extend(
-                [self.image.tobytes()])
-            self.models[model_key].endpoint.response = self.models[model_key].endpoint.do_inference()  # Inference
+            self.models[model_key].endpoint.request.ClearField("raw_input_contents")
+            
+            # Set the input tensor with the correct shape for this specific image
+            input_tensor = self.models[model_key].inputs['input_0']
+            input_tensor.ClearField("shape")
+            
+            # Set the actual shape: [1, 3, height, width] for batch_size=1
+            actual_shape = list(self.image.shape)  # Add batch dimension
+            input_tensor.shape.extend(actual_shape)
+            
+            # Add to request
+            self.models[model_key].endpoint.request.inputs.extend([input_tensor])
+            self.models[model_key].endpoint.request.raw_input_contents.extend([self.image.tobytes()])
+            
+            # Perform inference
+            self.models[model_key].endpoint.response = self.models[model_key].endpoint.do_inference()
             self.prediction = self.models[model_key].model_postprocess.extract_boxes(
                 self.models[model_key].endpoint.response,
             )
             if len(self.prediction[1]) > 0:
-                self.prediction[0] = scale_box_array(
-                    self.prediction[0], 
-                    model_input_dim=(model_input_h, model_input_w), 
-                    image_dim=(original_h, original_w), 
-                    padded=True
-                )
+                if not self.models[model_key].dynamic:
+                    self.prediction[0] = scale_box_array(
+                        self.prediction[0], 
+                        model_input_dim=(model_input_h, model_input_w), 
+                        image_dim=(original_h, original_w), 
+                        padded=True
+                    )
                 # if self.visualize:
-                #     self.visualize_img(self.orig_image, self.prediction[0], mode='BGR')
+                #     visualize(self.orig_image, self.prediction[0], mode='BGR')
                 if self.models[model_key].format == "coco" or self.models[model_key].format == "aitf":
                     persons = np.where(self.prediction[1] == 0)  # filter Pedestrians
                     return (
@@ -407,34 +439,37 @@ class TritonInference:
                 desc="Sending inference request to Triton",
                 unit="request(s)"
             ):
-                if model_key in sample['processed']:
-                    # self.processed_counter += 1
-                    logger.info('Skipping sample {} since it was already processed by model {} from previous requests'.format(
-                        sample['uuid'], model_key))
-                else:
-                    predictions = {
-                    'annotations':[],
-                    'dm_format_version':1,
-                    }
-                    # perform inference on each image, iteratively
-                    t3 = time.time()
-                    pred = infer_function(sample[data_key], model_key=model_key)
-                    t4 = time.time()
-                    infer_array[seerep_sample_idx] = t4 - t3
-                    # traverse the predictions for the current image
-                    predictions['annotations'] = datumaro_converter(sample=sample,
-                                                                    model_output=pred,
-                                                                    sample_idx=seerep_sample_idx,
-                                                                    visualize=self.visualize,
-                                                                    class_names=self.models[model_key].class_names)
-                    data[seerep_sample_idx]['annotations']['items'].append(predictions) 
+                # if model_key in sample['processed']:
+                #     # self.processed_counter += 1
+                #     logger.info('Skipping sample {} since it was already processed by model {} from previous requests'.format(
+                #         sample['uuid'], model_key))
+                # else:
+                predictions = {
+                'annotations':[],
+                'dm_format_version':1,
+                }
+                # perform inference on each image, iteratively
+                t3 = time.time()
+                pred = infer_function(sample[data_key], model_key=model_key)
+                t4 = time.time()
+                infer_array[seerep_sample_idx] = t4 - t3
+                # traverse the predictions for the current image
+                predictions['annotations'] = datumaro_converter(sample=sample,
+                                                                model_output=pred,
+                                                                sample_idx=seerep_sample_idx,
+                                                                visualize=self.visualize,
+                                                                class_names=self.models[model_key].class_names,
+                                                                model_name=self.models[model_key].model_name)
+                data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
-                if self.visualize:
+                if True:
+                # if self.visualize:
                     visualize(sample, 
                             self.models[model_key].model_name, 
                             self.models[model_key].class_names,
-                            new_model_key=False,
-                            model_name=self.models[model_key].model_name
+                            # new_model_key=False,
+                            # model_name=self.models[model_key].model_name,
+                            save=True
                             )
             if self.visualize:
                 cv2.destroyWindow(self.winname) 
@@ -501,4 +536,3 @@ class TritonInference:
         data = self.generate_datumaro_predictions(data)
 
         return data
-    

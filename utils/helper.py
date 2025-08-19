@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import imutils
+from typing import Optional
 
 color1 = (0, 0, 255)  # red
 text_color = (255, 255, 255)
@@ -106,8 +107,9 @@ def resize(image, input_metadata: list[dict]):
 def visualize(sample: dict,
             cv_window_name: str,
             class_names: list,
-            new_model_key: False,
-            model_name=None,
+            save=False,
+            new_model_key: Optional[str]=None,
+            model_name: Optional[str]=None,
             ):
     """
     This function visualizes the image sample with the bounding boxes and class labels.
@@ -120,32 +122,35 @@ def visualize(sample: dict,
     new_model_key: bool: The flag to indicate if the model predictions are new or not compared to SEEREP version.
     model_name: str: The name of the model to fetch the annotations from the sample dictionary based on Triton model name stored in SEEREP.
     """
-    if new_model_key:
-        model_index = -1
-    elif new_model_key == False and model_name != None:
-        model_index = sample['annotations']['categories']['label']['labels'].index(model_name)
+    if new_model_key is not None:
+        if new_model_key:
+            model_index = -1
+        elif new_model_key == False and model_name != None:
+            model_index = sample['annotations']['categories']['label']['labels'].index(model_name)
     else:
-        model_index = 0
+        model_index = -1    # use the last index since the annotations were appended to the list
     for ann_idx, ann in enumerate(sample['annotations']['items'][model_index]['annotations']):
-        bbox = ann['bbox']
-        bbox = cxcy2xyxy(bbox)
-        label = int(ann['id'])
+        bbox = ann['bbox']  # in tlxywh format. 
+        label_index = int(ann['label_id'])  # label_id is the index of the class in the class_names list
         cv2.rectangle(sample['image'],
-                        (bbox[0], bbox[1]),
-                        (bbox[2], bbox[3]),
+                        (int(bbox[0]), int(bbox[1])), # tlxy
+                        (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3])), # tlx + width, tly + height
                         color3, 2)
-        (tw, th), _ = cv2.getTextSize(class_names[label], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+        (tw, th), _ = cv2.getTextSize(class_names[label_index], cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
         cv2.rectangle(sample['image'],
-                        (bbox[0], bbox[1] - 25),
-                        (bbox[0] + tw, bbox[1]),
+                        (int(bbox[0]), int(bbox[1] - 25)),
+                        (int(bbox[0] + tw), int(bbox[1])),
                         color3, -1)
         cv2.putText(sample['image'],
-                    class_names[label],
-                    (bbox[0], bbox[1] - 5),
+                    class_names[label_index],
+                    (int(bbox[0]), int(bbox[1] - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.9, (255,255,255), 2)
-    cv2.imshow(cv_window_name, sample['image'])
-    cv2.waitKey()
+    if save:
+        cv2.imwrite(f"{cv_window_name}.jpg", sample['image'])
+    else:
+        cv2.imshow(cv_window_name, sample['image'])
+        cv2.waitKey()
 
 class DatumaroAnnotation:
     """
@@ -166,13 +171,18 @@ class DatumaroAnnotation:
             model_output,
             sample_idx,
             visualize=False,
-            class_names=None):
+            class_names=None,
+            model_name=None):
         predictions = []
         tmp = {
-            'bbox':[],
-            'id':'1',
-            'label_id':'',
+            'id':'0',
+            'type': "bbox",
+            "attributes": {},
+            'group': 0,
+            'label_id': 0,
+            'z_order': 0,
             'score':1,
+            'bbox':[],  # tlx, tly, w, h
             }
         if len(model_output[1]) == 0:
             pass
@@ -186,24 +196,32 @@ class DatumaroAnnotation:
                 # height (w, h).
                 # https://github.com/open-edge-platform/datumaro/blob/35a319c470f53f2a5eea7521cde24dcbc828b50a/src/datumaro/components/annotation.py#L1020
                 x, y, w, h = (
-                    np.round(start_cord[0], 2),
-                    np.round(start_cord[1], 2),
+                    0 if np.round(start_cord[0], 2) < 0 else np.round(start_cord[0], 2),
+                    0 if np.round(start_cord[1], 2) < 0 else np.round(start_cord[1], 2),
                     np.round(end_cord[0] - start_cord[0], 2),
                     np.round(end_cord[1] - start_cord[1], 2),
                 )
-                assert x > 0 and y > 0 and w > 0 and h > 0
+                assert w > 0 and h > 0
                 tmp['bbox'] = [x, y, w, h]
                 tmp['score'] = np.round(model_output[2][obj], 2)
-                tmp['id'] = str(int(model_output[1][obj]))
-                tmp['label_id'] = str(sample_idx)
+                tmp['id'] = sample['uuid']
+                tmp['label_id'] = int(model_output[1][obj])
                 tmp['label'] = class_names[int(model_output[1][obj])]
+                if model_name is not None:
+                    tmp['attributes'] = {
+                        'generator_model': model_name
+                    }
                 predictions.append(tmp)
                 tmp = {
-                    'bbox':[],
-                    'id':'1',
-                    'label_id':'',
+                    'id':0,
+                    'type': "bbox",
+                    "attributes": {},
+                    'group': 0,
+                    'label_id':0,
+                    'z_order': 0,
                     'score':1,
-                }
+                    'bbox':[],  # tlx, tly, w, h
+                    }
 
                 # Visualize the predictions generated by triton inference
                 if visualize:
@@ -256,7 +274,7 @@ class DatumaroAnnotation:
         """
         predictions = []
         tmp = {
-                'id':'1',   # Normally this is the PC file name but here we use the sample uuid
+                'id':1,   # Normally this is the PC file name but here we use the sample uuid
                 'type': "cuboid_3d",
                 "attributes": {"occluded": False},
                 "group": 0,
@@ -272,13 +290,24 @@ class DatumaroAnnotation:
         else:
             # TODO check if these values are consistent with the DATUMARO format. It works with OpenPCDet
             for obj in range(len(model_output[1])):
+                tmp['id'] = sample['uuid']
                 tmp['label_id'] = model_output[2][obj]
                 tmp['position'] = model_output[0][obj, 0:3]
                 tmp['scale'] = model_output[0][obj, 3:6]
                 tmp['rotation'] = np.array([0, 0, model_output[0][obj, 6] + 1e-10])
                 tmp['score'] = model_output[1][obj]
-                tmp['id'] = sample['uuid']
                 predictions.append(tmp)
+                tmp = {
+                'id':1,   # Normally this is the PC file name but here we use the sample uuid
+                'type': "cuboid_3d",
+                "attributes": {"occluded": False},
+                "group": 0,
+                'label_id':0, # unique id for each object instance
+                'score':1,  # confidence score
+                "position": [], # center of the cuboid x,y,z
+                "rotation": [], # rotation of the cuboid in radian w.r.t the x,y,z axis
+                "scale": [], # w,h,l
+                }
             return predictions
 
 
@@ -320,7 +349,7 @@ def process_model_output(sample,
             tmp = {
                 'bbox':[],
                 'id':'1',
-                'label_id':'',
+                'label_id':0,
                 'score':1,
             }
             # Visualize the predictions generated by triton inference
