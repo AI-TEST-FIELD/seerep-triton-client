@@ -17,7 +17,7 @@ class Detrex_preprocess(Preprocess):
         '''
         orig = cv_image.copy()
         orig = cv2.cvtColor(orig, cv2.COLOR_RGB2BGR)
-        orig = np.transpose(orig, (2, 0, 1))
+        # orig = np.transpose(orig, (2, 0, 1))
         orig = np.expand_dims(orig, axis=0)
 
         return orig

@@ -18,6 +18,6 @@ class Detectron2_preprocess(Preprocess):
         orig = cv_image.copy()
         orig = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
         orig = np.transpose(cv_image, (2, 0, 1))    
-        orig = np.expand_dims(cv_image, axis=0)
+        # orig = np.expand_dims(cv_image, axis=0)
 
         return orig
