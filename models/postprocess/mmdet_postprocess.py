@@ -31,15 +31,13 @@ class MMDet_postprocess(Postprocess):
     def extract_boxes(self, prediction, confidence=0.4):
         """Converts raw output to detections with confidence (default=0.4) thresholding. 
             Returns:
-                 list of detections, on (n,6) tensor per image [xyxy, conf, cls]
+                 list of detections, on (n,4) tensor per image [xyxy, conf, cls]
         """
         boxes = self.deserialize_bytes_float(prediction.raw_output_contents[0])
         boxes = np.reshape(boxes, prediction.outputs[0].shape)
-        shape = self.deserialize_bytes_int(prediction.raw_output_contents[1])
-        shape = np.reshape(shape, prediction.outputs[1].shape)
-        scores = self.deserialize_bytes_float(prediction.raw_output_contents[2])
-        scores = np.reshape(scores, prediction.outputs[2].shape)
-        class_ids = self.deserialize_bytes_int(prediction.raw_output_contents[3])
-        class_ids = np.reshape(class_ids, prediction.outputs[3].shape)
-        conf_inds = np.where(scores > confidence)
-        return [boxes[conf_inds], class_ids[conf_inds], scores[conf_inds]]
+        labels = self.deserialize_bytes_int(prediction.raw_output_contents[2])
+        labels = np.reshape(labels, prediction.outputs[2].shape)
+        scores = self.deserialize_bytes_float(prediction.raw_output_contents[1])
+        scores = np.reshape(scores, prediction.outputs[1].shape)
+        # conf_inds = np.where(scores > confidence)
+        return [boxes, labels, scores]
