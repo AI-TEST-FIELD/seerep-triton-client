@@ -462,8 +462,8 @@ class TritonInference:
                                                                 model_name=self.models[model_key].model_name)
                 data[seerep_sample_idx]['annotations']['items'].append(predictions) 
                 # Visualize the groundtruth annotations on the same image as predictions
-                if True:
-                # if self.visualize:
+                # if True:
+                if self.visualize:
                     visualize(sample, 
                             self.models[model_key].model_name, 
                             self.models[model_key].class_names,

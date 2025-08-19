@@ -174,6 +174,10 @@ class DatumaroAnnotation:
             class_names=None,
             model_name=None):
         predictions = []
+        annotations_count = 0
+        # Count the total number of annotations saved from previous runs
+        for item in sample['annotations']['items']:
+            annotations_count += len(item['annotations'])
         tmp = {
             'id':'0',
             'type': "bbox",
@@ -204,7 +208,7 @@ class DatumaroAnnotation:
                 assert w > 0 and h > 0
                 tmp['bbox'] = [x, y, w, h]
                 tmp['score'] = np.round(model_output[2][obj], 2)
-                tmp['id'] = sample['uuid']
+                tmp['id'] = annotations_count + obj + 1
                 tmp['label_id'] = int(model_output[1][obj])
                 tmp['label'] = class_names[int(model_output[1][obj])]
                 if model_name is not None:
@@ -289,8 +293,8 @@ class DatumaroAnnotation:
             pass
         else:
             # TODO check if these values are consistent with the DATUMARO format. It works with OpenPCDet
-            for obj in range(len(model_output[1])):
-                tmp['id'] = sample['uuid']
+            for obj, _ in enumerate(range(len(model_output[1]))):
+                tmp['id'] = obj
                 tmp['label_id'] = model_output[2][obj]
                 tmp['position'] = model_output[0][obj, 0:3]
                 tmp['scale'] = model_output[0][obj, 3:6]
