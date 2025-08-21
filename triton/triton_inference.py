@@ -164,6 +164,11 @@ class TritonInference:
                     'frcnn_800_coco':Detectron2_Det,
                     'retinanet_coco':Detectron2_Det,
                     'rtmdet_coco':MMDet, 
+                    'conditional_detr_r50_coco': MMDet,
+                    'crowdhuman_r_50_coco': MMDet,
+                    'grounding_dino_b_swin_coco': MMDet,
+                    'faster_rcnn_r_101_coco': MMDet,
+
                 }
             except ImportError as e:
                 logger.error(f"Error importing models for image modality: {e}")
