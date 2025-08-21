@@ -3,6 +3,7 @@ import json
 import numpy as np
 from pathlib import Path
 import warnings
+import ssl
 warnings.filterwarnings("ignore", category=FutureWarning, module="mmengine")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="mmengine")
 warnings.filterwarnings("ignore", category=UserWarning, module="mmengine")
@@ -20,7 +21,7 @@ from mmdet.apis import DetInferencer
 # triton_python_backend_utils is available in every Triton Python model
 import triton_python_backend_utils as pb_utils
 
-
+ssl._create_default_https_context = ssl._create_unverified_context
 class TritonPythonModel:
     """
     Triton Python model for MMDetection inference.
