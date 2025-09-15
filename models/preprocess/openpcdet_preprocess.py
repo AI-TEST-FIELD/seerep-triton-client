@@ -8,7 +8,8 @@ from pcdet.datasets import processor
 class OpenPCDet_preprocess(Preprocess):
 
     def __init__(self):
-        config_path = os.path.join(os.environ['PROJECT_ROOT'], 'config', 'kitti_dataset.yaml')
+        dirname = os.path.dirname(__file__)
+        config_path = os.path.join(dirname, '../../config/', 'kitti_dataset.yaml')
         with open(config_path, 'r') as f:
             self.dataset_cfg = EasyDict(yaml.safe_load(f))
         self.point_cloud_range = np.array(self.dataset_cfg.POINT_CLOUD_RANGE, dtype=np.float32)
@@ -17,9 +18,9 @@ class OpenPCDet_preprocess(Preprocess):
             point_cloud_range=self.point_cloud_range
         )
         self.data_processor = processor.data_processor.DataProcessor(
-            self.dataset_cfg.DATA_PROCESSOR, 
+            self.dataset_cfg.DATA_PROCESSOR,
             point_cloud_range=self.point_cloud_range,
-            training=False, 
+            training=False,
             num_point_features=self.point_feature_encoder.num_point_features
         )
 
@@ -36,7 +37,7 @@ class OpenPCDet_preprocess(Preprocess):
         data_dict['voxel_num_points'] = N* range filtered points
         '''
 
-        
+
         data_dict = {
             'points': pointcloud_array,
             'frame_id': 0,
