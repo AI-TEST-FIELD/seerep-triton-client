@@ -74,9 +74,14 @@ class ModelData:
         self.endpoint.output = [output["name"] for output in self.output_metadata]
 
         # Check if model supports batching
-        max_batch_size = self.meta_data["config_response"].config.max_batch_size
-        self.batching_supported = max_batch_size > 0
-        self.max_batch_size = max_batch_size if self.batching_supported else 1
+        if self.format == "kitti":
+            # Point cloud models in OpenPCDet do not support batching
+            self.batching_supported = False
+            self.max_batch_size = 1
+        else:
+            max_batch_size = self.meta_data["config_response"].config.max_batch_size
+            self.batching_supported = max_batch_size > 0
+            self.max_batch_size = max_batch_size if self.batching_supported else 1
 
         self.inputs = {}
         for input, i in zip(self.input_metadata, range(len(self.input_metadata))):
