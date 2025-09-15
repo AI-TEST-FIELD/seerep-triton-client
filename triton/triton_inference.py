@@ -382,22 +382,25 @@ class TritonInference:
         self.models[model_key].endpoint.response = (
             self.models[model_key].endpoint.do_inference()
         )  # perform the channel Inference
-        box_array, scores, labels = self.models[model_key].model_postprocess.extract_boxes(
+        self.prediction = self.models[model_key].model_postprocess.extract_boxes(
             self.models[model_key].endpoint.response
         )
 
+
+
         # Show only persons above given confidence threshold
-        indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
+        # indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
+        # box_array, scores, labels =box_array[indices, :], scores[indices], labels[indices]
 
         if self.visualize:
             self.visualizer.draw_scenes(
                 points=self.pc["points"],
-                ref_boxes=box_array[indices, :],
-                ref_scores=scores[indices],
-                ref_labels=labels[indices],
+                ref_boxes=self.prediction[0],
+                ref_scores=self.prediction[1],
+                ref_labels=self.prediction[2],
             )
 
-        return box_array[indices, :], scores[indices], labels[indices]
+        return self.prediction
 
     def generate_datumaro_predictions(self,
                                       data: list[dict],
