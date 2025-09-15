@@ -4,7 +4,8 @@ from .base_postprocess import Postprocess
 
 class OpenPCDet_postprocess(Postprocess):
     def __init__(self):
-        self.config_path = os.path.join(os.environ['PROJECT_ROOT'], 'config', 'kitti.names')
+        dirname = os.path.dirname(__file__)
+        self.config_path = os.path.join(os.path.join(dirname, '../../config/', 'kitti.names'))
 
     def postprocess(self):
         pass
@@ -34,15 +35,15 @@ class OpenPCDet_postprocess(Postprocess):
 
         Args:
             prediction (Prediction): The prediction object containing raw output contents and output metadata.
-            
+
         Returns:
             tuple: A tuple containing the extracted boxes, scores, and classes.
         """
         outputs = []
         for output_idx in range(len(prediction.raw_output_contents)):
-            outputs.append(self.deserialize_bytes(prediction.raw_output_contents[output_idx], 
+            outputs.append(self.deserialize_bytes(prediction.raw_output_contents[output_idx],
                                                   prediction.outputs[output_idx].datatype))
-            outputs[output_idx] = np.reshape(outputs[output_idx], 
+            outputs[output_idx] = np.reshape(outputs[output_idx],
                                              prediction.outputs[output_idx].shape)
-        # TODO make this dynamic? 
+        # TODO make this dynamic?
         return outputs[0], outputs[1], outputs[2]   # boxes, scores, classes
