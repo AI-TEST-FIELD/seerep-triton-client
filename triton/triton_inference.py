@@ -31,7 +31,7 @@ class ModelData:
         self.model_name = model.model_name
         self.dynamic = False
         self.batching_supported = False
-        
+
     def init_endpoint(self, endpoint_url: str, log_level: str="info"):
         """
         Initialize the Triton endpoint for the model.
@@ -55,11 +55,11 @@ class ModelData:
             self.class_names = self.model_postprocess.load_class_names(dataset="KITTI")
             self.format = "kitti"
         else:
-            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
+            logger.error("Class names not found for the model. Make sure coco or crop is in the model name")
             self.class_names = None
             self.format = None
         self._init_model_io()
-        
+
     def _init_model_io(self):
         """
         Fetch the model metadata and initialize the model input and output tensors
@@ -89,10 +89,10 @@ class ModelData:
             self.inputs[f"input_{i}"].datatype = input["dtype"]
             self.endpoint.request.inputs.extend([self.inputs[f"input_{i}"]])
             # DON'T set the shape here for batching models!
-            # The input shapes are set dynamically in the respective inference function e.g. 
+            # The input shapes are set dynamically in the respective inference function e.g.
             # triton_infer_pointcloud() and triton_infer_image()
             # self.inputs[f"input_{i}"].shape.extend(shape_to_set)
-            
+
         # Check for dynamic shapes
         if any(-1 in input["shape"] for input in self.input_metadata):
             self.dynamic = True
@@ -104,10 +104,10 @@ class ModelData:
             self.endpoint.request.outputs.extend([self.outputs[f"output_{i}"]])
 
 class TritonInference:
-    def __init__(self, 
-                 model_name: list[str]=['yolov5m_coco'], 
-                 seerep_endpoint_url='agrigaia-ur.ni.dfki:9090', 
-                 triton_endpoint_url='10.249.6.23:8001', 
+    def __init__(self,
+                 model_name: list[str]=['yolov5m_coco'],
+                 seerep_endpoint_url='agrigaia-ur.ni.dfki:9090',
+                 triton_endpoint_url='10.249.6.23:8001',
                  log_level='error',
                  visualize=False,
                  modality='image'):
@@ -115,7 +115,7 @@ class TritonInference:
         self.seerep_endpoint = SeerepEndpoint(
             seerep_endpoint_url,
             modality=modality,
-            visualize=visualize, 
+            visualize=visualize,
             log_level=log_level
             )
         # TODO Create multiple endpoints for multiple models passed as string list
@@ -143,10 +143,10 @@ class TritonInference:
             'WARNING': logging.WARNING,
         }
         logger.setLevel(log_level_map.get(log_level.upper(), logging.ERROR))
-        
+
     def _initialize_models(self):
         """
-        Initialize the models for the given modality. 
+        Initialize the models for the given modality.
         """
         if self.modality == 'image':
             try:
@@ -157,7 +157,7 @@ class TritonInference:
                     'fcos_coco':Detectron2_Det,
                     'frcnn_800_coco':Detectron2_Det,
                     'retinanet_coco':Detectron2_Det,
-                    'rtmdet_coco':MMDet, 
+                    'rtmdet_coco':MMDet,
                     'conditional_detr_r50_coco': MMDet,
                     'crowdhuman_r_50_coco': MMDet,
                     'grounding_dino_b_swin_coco': MMDet,
@@ -188,7 +188,7 @@ class TritonInference:
             if model not in self.models_database.keys():
                 logger.error(
                     f"Model {self.model_names} not found in the models database for {self.modality} modality.\n"
-                    f"Supported models are: {list(self.models_database.keys())}" 
+                    f"Supported models are: {list(self.models_database.keys())}"
                 )
                 sys.exit(1)
             curr_model = self.models_database.get(model)(model_name=model)
@@ -231,10 +231,10 @@ class TritonInference:
                         "rotation": 0.0,
                     },
                     "group": 0,
-                    "label_id": 0, 
+                    "label_id": 0,
                     "z_order": 0,
                     "bbox":[
-                        0, 
+                        0,
                         1,
                         2,
                         3
@@ -252,13 +252,13 @@ class TritonInference:
             }
         }
 
-    # TODO add dynamic confidence value and 
+    # TODO add dynamic confidence value and
     def triton_infer_image(self, cv_image, model_key: str, filter_class_idx: int=0)->list[np.ndarray]:
         """
         Perform inference on a single image via the Triton server gRPC endpoint.
         By default, the image is resized to the model input size.
-        The model input size is determined by the model metadata. 
-        Class ID=0 is filtered out by default. since persons are interesting only for the model 
+        The model input size is determined by the model metadata.
+        Class ID=0 is filtered out by default. since persons are interesting only for the model
         based on COCO dataset.
         Args:
             cv_image (numpy.ndarray): Input image in BGR format.
@@ -270,7 +270,7 @@ class TritonInference:
         if self.models[model_key].dynamic:
             model_input_h, model_input_w = original_h, original_w
         else:
-            cv_image, model_input_h, model_input_w = resize(cv_image, 
+            cv_image, model_input_h, model_input_w = resize(cv_image,
                                                             self.models[model_key].input_metadata)
         # named_window = 'Resized source image'
         # cv2.imshow(named_window, cv_image)
@@ -287,19 +287,19 @@ class TritonInference:
             # Clear previous request data
             self.models[model_key].endpoint.request.ClearField("inputs")
             self.models[model_key].endpoint.request.ClearField("raw_input_contents")
-            
+
             # Set the input tensor with the correct shape for this specific image
             input_tensor = self.models[model_key].inputs['input_0']
             input_tensor.ClearField("shape")
-            
+
             # Set the actual shape: [1, 3, height, width] for batch_size=1
             actual_shape = list(self.image.shape)  # Add batch dimension
             input_tensor.shape.extend(actual_shape)
-            
+
             # Add to request
             self.models[model_key].endpoint.request.inputs.extend([input_tensor])
             self.models[model_key].endpoint.request.raw_input_contents.extend([self.image.tobytes()])
-            
+
             # Perform inference
             self.models[model_key].endpoint.response = self.models[model_key].endpoint.do_inference()
             self.prediction = self.models[model_key].model_postprocess.extract_boxes(
@@ -308,9 +308,9 @@ class TritonInference:
             if len(self.prediction[1]) > 0:
                 if not self.models[model_key].dynamic:
                     self.prediction[0] = scale_box_array(
-                        self.prediction[0], 
-                        model_input_dim=(model_input_h, model_input_w), 
-                        image_dim=(original_h, original_w), 
+                        self.prediction[0],
+                        model_input_dim=(model_input_h, model_input_w),
+                        image_dim=(original_h, original_w),
                         padded=True
                     )
                 # if self.visualize:
@@ -326,9 +326,9 @@ class TritonInference:
                     return self.prediction
             else:
                 return self.prediction
-    
-    def triton_infer_pointcloud(self, 
-                                pointcloud:np.ndarray, 
+
+    def triton_infer_pointcloud(self,
+                                pointcloud:np.ndarray,
                                 model_key: str,
                                 confidence_threshold: float=0.4,
                                 class_idx: int=1)->list[np.ndarray]:
@@ -345,7 +345,7 @@ class TritonInference:
             "raw_input_contents"
         )  # Flush the previous sample content
         for key, idx in zip(self.models[model_key].inputs, range(len(self.models[model_key].inputs))):
-            tmp_shape = self.models[model_key].input_metadata[idx]['shape']
+            tmp_shape = list(self.models[model_key].input_metadata[idx]['shape'])
             tmp_shape[tmp_shape.index(-1)] = num_voxels
             self.models[model_key].inputs[key].ClearField("shape")
             self.models[model_key].endpoint.request.inputs[idx].ClearField("shape")
@@ -385,7 +385,7 @@ class TritonInference:
         box_array, scores, labels = self.models[model_key].model_postprocess.extract_boxes(
             self.models[model_key].endpoint.response
         )
-        
+
         # Show only persons above given confidence threshold
         indices = np.where((labels == class_idx) & (scores > confidence_threshold))[0].tolist()
 
@@ -396,30 +396,30 @@ class TritonInference:
                 ref_scores=scores[indices],
                 ref_labels=labels[indices],
             )
-            
+
         return box_array[indices, :], scores[indices], labels[indices]
-    
-    def generate_datumaro_predictions(self, 
-                                      data: list[dict], 
+
+    def generate_datumaro_predictions(self,
+                                      data: list[dict],
                                       model_key: str)->list[dict]:
         """
         Iterates through the data samples and performs inference on each image sample.
         Adds the predictions to the individual sample as data[sample_idx]['annotations'] in datumaro format.
         Args:
             data (list): List of data samples from SEEREP.
-        
+
         """
         if self.modality == 'image':
             data_key = 'image'
-            infer_function = self.triton_infer_image 
-            datumaro_processor = DatumaroAnnotation(format=self.models[model_key].format) 
+            infer_function = self.triton_infer_image
+            datumaro_processor = DatumaroAnnotation(format=self.models[model_key].format)
             datumaro_converter = datumaro_processor.toCOCO
         elif self.modality == 'pointcloud':
             data_key = 'pointcloud_processed'
             infer_function = self.triton_infer_pointcloud
             datumaro_processor = DatumaroAnnotation(format=self.models[model_key].format)
             datumaro_converter = datumaro_processor.toKITTI
-            
+
         else:
             logger.error("Unsupported modality: {}".format(self.modality))
             sys.exit(1)
@@ -459,22 +459,22 @@ class TritonInference:
                                                                 visualize=self.visualize,
                                                                 class_names=self.models[model_key].class_names,
                                                                 model_name=self.models[model_key].model_name)
-                data[seerep_sample_idx]['annotations']['items'].append(predictions) 
+                data[seerep_sample_idx]['annotations']['items'].append(predictions)
                 # Visualize the groundtruth annotations on the same image as predictions
                 # if True:
                 if self.visualize:
-                    visualize(sample, 
-                            self.models[model_key].model_name, 
+                    visualize(sample,
+                            self.models[model_key].model_name,
                             self.models[model_key].class_names,
                             # new_model_key=False,
                             # model_name=self.models[model_key].model_name,
                             save=True
                             )
             if self.visualize:
-                cv2.destroyWindow(self.winname) 
+                cv2.destroyWindow(self.winname)
             logger.info('Processed all inference requests in current data subset!')
         return data
-             
+
     def generate_annotations_by_sample_uuids(self, sample_uuids: list)->list[dict]:
         """
         Generate annotations for the given sample UUIDs using the Triton inference model.
@@ -488,7 +488,7 @@ class TritonInference:
                                                 data=data,
                                                 category=self.model_names)
         return data
-    
+
     def fetch_data_by_sample_uuids(self, sample_uuids: list[str])->list[dict]:
         """
         Fetch data from the SEEREP server for the given sample UUIDs.
@@ -498,7 +498,7 @@ class TritonInference:
             list: List of data samples.
         """
         return self.seerep_endpoint.fetch_data_by_sample_uuid(sample_uuids, model_name=self.model_names)
-    
+
     def request_triton_inference(self, data: list[dict])->list[dict]:
         """
         Perform inference on the given data using the Triton inference model.
@@ -508,7 +508,7 @@ class TritonInference:
             list: List of data samples with predictions.
         """
         return self.generate_datumaro_predictions(data)
-    
+
     def get_project_uuid(self, project_name: str)->str:
         """
         Get the project UUID for the given project name.
@@ -518,7 +518,7 @@ class TritonInference:
             str: Project UUID.
         """
         return self.seerep_endpoint.get_project_uuid(project_name)
-    
+
     def generate_annotations_by_project_uuids(self, project_uuids: list)->list[dict]:
         """
         Generate annotations for the given sample UUIDs using the Triton inference model.
@@ -527,7 +527,7 @@ class TritonInference:
         Returns:
         """
         # project_uuid = self.seerep_endpoint.get_project_uuid('EV41_Kleidung_Sonnenbrille_DunkleCap_225Deg_2024-10-10-18-58-13_0')
-        data = self.seerep_endpoint.fetch_data_by_project(project_uuids, 
+        data = self.seerep_endpoint.fetch_data_by_project(project_uuids,
                                                     model_name=self.model_names)
         # NOTE! This is a temporary fix to fetch data by sample uuids. UUIDs will be fetched directly inside the Triton class.
         sample_uuids = self.seerep_endpoint.fetch_uuids_by_project_uuid(project_uuids)
