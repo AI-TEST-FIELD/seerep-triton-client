@@ -519,7 +519,7 @@ class SeerepEndpoint:
                               project_uuids: list[str], 
                               model_name: str, 
                               num_samples:int=None,
-                              modality: str='images')->dict:
+                              modality: str='image')->dict:
         '''
         Fetches data from SEEREP server based on the project_uuids. It also checks if the predictions for the model_name
         have already been generated for the data samples. If yes, then sets 'processed' flag to True.
@@ -544,7 +544,7 @@ class SeerepEndpoint:
         )
         self._builder.Finish(queryMsg)
         buffer = self._builder.Output()
-        if modality == 'images':
+        if modality == 'image':
             return self.process_images(buffer, model_name=model_name, num_samples=num_samples)
         else:
             return self.process_pointclouds(buffer, model_name=model_name, num_samples=num_samples)

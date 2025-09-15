@@ -87,21 +87,12 @@ class ModelData:
             self.inputs[f"input_{i}"] = service_pb2.ModelInferRequest().InferInputTensor()
             self.inputs[f"input_{i}"].name = input["name"]
             self.inputs[f"input_{i}"].datatype = input["dtype"]
-            
+            self.endpoint.request.inputs.extend([self.inputs[f"input_{i}"]])
             # DON'T set the shape here for batching models!
-            # The shape will be set dynamically in triton_infer_image()
-            # based on the actual input data
+            # The input shapes are set dynamically in the respective inference function e.g. 
+            # triton_infer_pointcloud() and triton_infer_image()
+            # self.inputs[f"input_{i}"].shape.extend(shape_to_set)
             
-            # Only set shape for non-batching models
-            if not self.batching_supported:
-                if -1 in input["shape"]:
-                    # Handle dynamic dimensions properly
-                    shape_to_set = input["shape"][1:]
-                else:
-                    shape_to_set = input["shape"]
-                self.inputs[f"input_{i}"].shape.extend(shape_to_set)
-                self.endpoint.request.inputs.extend([self.inputs[f"input_{i}"]])
-
         # Check for dynamic shapes
         if any(-1 in input["shape"] for input in self.input_metadata):
             self.dynamic = True
@@ -354,9 +345,9 @@ class TritonInference:
             "raw_input_contents"
         )  # Flush the previous sample content
         for key, idx in zip(self.models[model_key].inputs, range(len(self.models[model_key].inputs))):
-            tmp_shape = self.models[model_key].inputs[key].shape
+            tmp_shape = self.models[model_key].input_metadata[idx]['shape']
+            tmp_shape[tmp_shape.index(-1)] = num_voxels
             self.models[model_key].inputs[key].ClearField("shape")
-            tmp_shape[0] = num_voxels
             self.models[model_key].endpoint.request.inputs[idx].ClearField("shape")
             self.models[model_key].endpoint.request.inputs[idx].shape.extend(tmp_shape)
             self.models[model_key].inputs[key].shape.extend(tmp_shape)
