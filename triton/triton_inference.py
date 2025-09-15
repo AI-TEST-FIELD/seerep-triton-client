@@ -44,9 +44,8 @@ class ModelData:
             endpoint_url=endpoint_url,
             log_level=log_level,
         )
-        self._init_model_io()
         self.class_names = None
-        if "COCO" or "coco" in self.model_name:
+        if "COCO" in self.model_name or "coco" in self.model_name:
             self.class_names = self.model_postprocess.load_class_names(dataset="COCO")
             self.format = "coco"
         elif "CROP" in self.model_name:
@@ -59,7 +58,7 @@ class ModelData:
             logger.error("Class names not found for the model. Make sure coco or crop is in the model name")    
             self.class_names = None
             self.format = None
-            
+        self._init_model_io()
         
     def _init_model_io(self):
         """
@@ -97,8 +96,7 @@ class ModelData:
             if not self.batching_supported:
                 if -1 in input["shape"]:
                     # Handle dynamic dimensions properly
-                    shape_to_set = input["shape"].copy()
-                    # You might want to set reasonable defaults or leave as -1
+                    shape_to_set = input["shape"][1:]
                 else:
                     shape_to_set = input["shape"]
                 self.inputs[f"input_{i}"].shape.extend(shape_to_set)
