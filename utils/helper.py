@@ -130,7 +130,7 @@ def visualize(sample: dict,
     else:
         model_index = -1    # use the last index since the annotations were appended to the list
     for ann_idx, ann in enumerate(sample['annotations']['items'][model_index]['annotations']):
-        bbox = ann['bbox']  # in tlxywh format. 
+        bbox = ann['bbox']  # in tlxywh format.
         label_index = int(ann['label_id'])  # label_id is the index of the class in the class_names list
         cv2.rectangle(sample['image'],
                         (int(bbox[0]), int(bbox[1])), # tlxy
@@ -272,7 +272,9 @@ class DatumaroAnnotation:
                 model_output,
                 sample_idx,
                 visualize=False,
-                class_names=None):
+                class_names=None,
+                model_name = None,
+                ):
         """
         This function converts the model output to KITTI format.
         """
@@ -300,6 +302,10 @@ class DatumaroAnnotation:
                 tmp['scale'] = model_output[0][obj, 3:6]
                 tmp['rotation'] = np.array([0, 0, model_output[0][obj, 6] + 1e-10])
                 tmp['score'] = model_output[1][obj]
+                if model_name is not None:
+                    tmp['attributes'] = {
+                        'generator_model': model_name
+                    }
                 predictions.append(tmp)
                 tmp = {
                 'id':1,   # Normally this is the PC file name but here we use the sample uuid
