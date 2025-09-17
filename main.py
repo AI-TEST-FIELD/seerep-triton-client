@@ -26,7 +26,7 @@ example_project_uuid = ['2918b2dd-0bc9-40d5-bf94-0a60ff0f1b3a']
 # example_project_uuid = 'c8a411ab-f3c9-4f41-b38f-9d1c73515cce'
 # example_uuids = ['7ffc1491-b083-4929-b70a-b2e1c45e49ba',
 #            'c0cb19f2-1a02-4d90-85e0-9a900b8a0f46']
-model_names = ['second_iou_kitti', 'pointpillar_kitti']
+model_names = ['second_iou_kitti']
 # model_names = ['second_iou_kitti']
 
 
@@ -59,11 +59,11 @@ for batch in range(0, len(data_uuids), batch_size):
     for model_name in model_names:
         logger.info("Generating annotations for model: %s", model_name)
         data = triton_client.generate_datumaro_predictions(data[batch:batch + batch_size], model_key=model_name)
-        # triton_client.seerep_endpoint.send_dataset(
-        #                                     uuids=data_uuids[batch:batch + batch_size],
-        #                                     data=data,
-        #                                     category=model_name,     # 'groundtruth' or model_name
-        #                                     ignore_ground_truth=False)
+        triton_client.seerep_endpoint.send_dataset(
+                                             uuids=data_uuids[batch:batch + batch_size],
+                                             data=data,
+                                             category=model_name,     # 'groundtruth' or model_name
+                                             ignore_ground_truth=False)
         data = []
 # If True, predictions will be sent as ground truth. coupled with the category parameter as 'groundtruth'
 
