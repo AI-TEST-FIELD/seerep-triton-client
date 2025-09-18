@@ -272,7 +272,8 @@ class DatumaroAnnotation:
                 model_output,
                 sample_idx,
                 visualize=False,
-                class_names=None):
+                class_names=None,
+                model_name=None):
         """
         This function converts the model output to KITTI format.
         """

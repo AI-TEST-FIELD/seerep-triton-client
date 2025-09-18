@@ -117,10 +117,10 @@ class Visualizer:
         camera_params = ctr.convert_to_pinhole_camera_parameters() 
         # Define the desired camera extrinsic parameters.
         # TODO this does not do anything. WHY?
-        camera_params.extrinsic = np.array([[ 0.033585759937874757, -0.13889353862189011, 0.98973763273833582, 0.0],
-                                            [-0.99703926833339696, 0.063882646483045008, 0.042798421460690204, 0.0],
-                                            [-0.069171483507295253, -0.98824470269635745, -0.13633676489483001, 0.0],
-                                            [1.2936070652362615, 7.8928817882678945, 21.5193268164304, 1.0]])
+        # camera_params.extrinsic = np.array([[ 0.033585759937874757, -0.13889353862189011, 0.98973763273833582, 0.0],
+        #                                     [-0.99703926833339696, 0.063882646483045008, 0.042798421460690204, 0.0],
+        #                                     [-0.069171483507295253, -0.98824470269635745, -0.13633676489483001, 0.0],
+        #                                     [1.2936070652362615, 7.8928817882678945, 21.5193268164304, 1.0]])
         camera_params.extrinsic = np.eye(4)
         ctr.convert_from_pinhole_camera_parameters(camera_params)
         # draw origin
@@ -160,7 +160,7 @@ class Visualizer:
             # if score is not None:
             #     corners = box3d.get_box_points()
             #     self.vis.add_3d_label(corners[5], '%.2f' % score[i])
-        return  self.vis
+        # return  self.vis
     
     def update_box(self, gt_boxes, color=(0, 1, 0), ref_labels=None, score=None):
         for i in range(gt_boxes.shape[0]):
@@ -209,8 +209,6 @@ class Visualizer:
                     ref_labels=None, 
                     ref_scores=None, 
                     point_colors=None):
-
-        self.vis.create_window()
         # Draw points
         pts = open3d.geometry.PointCloud()
         pts.points = open3d.utility.Vector3dVector(points[:, :3])
@@ -224,11 +222,11 @@ class Visualizer:
 
         # Draw ground truth boxes
         if gt_boxes is not None:
-            self.vis = self.draw_box(gt_boxes, (0, 0, 1))
+            self.draw_box(gt_boxes, (0, 0, 1))
 
         # Draw reference boxes
         if ref_boxes is not None:
-            self.vis = self.draw_box(ref_boxes, (0, 1, 0), ref_labels, ref_scores)
+            self.draw_box(ref_boxes, (0, 1, 0), ref_labels, ref_scores)
 
         # Display window and then destroy it. 
         self.vis.run()
