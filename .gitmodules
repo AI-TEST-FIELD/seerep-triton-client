@@ -1,0 +1,3 @@
+[submodule "aitf-evaluation-service"]
+	path = aitf-evaluation-service
+	url = git@git.ni.dfki.de:ai-test-field/evaluation/aitf-evaluation-service.git
