@@ -26,6 +26,7 @@ from seerep.fb import (
     Header,
     Image,
     Point,
+    PointCloud2,
     ProjectInfos,
     Query,
     StringVector,
@@ -105,7 +106,7 @@ class SeerepEndpoint:
         # register and initialise the stub
         self.modality = modality
         self.intialize_gRPC_stubs()
-        
+
         # self.ann_dict = self.annotation_dict(format=format)
         if self.visualize and self.modality == 'image':
             self.source_window = 'SEEREP source image'
@@ -164,7 +165,7 @@ class SeerepEndpoint:
             grpc_stub  = pointCloudService.PointCloudServiceStub(grpc_channel)
         else:
             logger.error(
-                "Modality not supported. Please use image or pointcloud. \n"+ 
+                "Modality not supported. Please use image or pointcloud. \n"+
                 "Cannot create secondary channel for target modality {}".format(self.modality))
             sys.exit(0)
         grpc_stubmeta = metaOperations.MetaOperationsStub(grpc_channel)
@@ -177,7 +178,7 @@ class SeerepEndpoint:
         return grpc stub
         """
         return self._grpc_stub
-    
+
     def tf_channel(self):
         """
          Establish a channel for querying TFs
@@ -195,7 +196,7 @@ class SeerepEndpoint:
         builder = flatbuffers.Builder(1024)
 
         return builder
-    
+
     def deserialize_bytes_float(self, encoded_tensor):
         strs = list()
         offset = 0
@@ -223,7 +224,7 @@ class SeerepEndpoint:
     def get_project_uuid(self, project_name: list[str], log=False):
         '''
         Returns UUID of the project given by project_name.
-        #TODO return a list of projects or single project uuids? 
+        #TODO return a list of projects or single project uuids?
         '''
         Empty.Start(self._builder)
         emptyMsg = Empty.End(self._builder)
@@ -256,11 +257,11 @@ class SeerepEndpoint:
         else:
             logger.error("The requested project \n {} is not available on the SEEREP Server! Note that project names are case-sensitive! Please select a project from the list displayed above!".format(project_name))
             sys.exit(0)
-            
+
     def fetch_data_by_sample_uuid(self, data_uuids: list[str], model_name: str)->dict:
         '''
-        Fetches data from SEEREP server based on the data sample UUIDs and looks through all projects. 
-        It also checks if the predictions for the model_name have already been generated for the data samples. 
+        Fetches data from SEEREP server based on the data sample UUIDs and looks through all projects.
+        It also checks if the predictions for the model_name have already been generated for the data samples.
         If yes, then sets 'processed' flag to True.
         Returns a list of dictionaries containing the data samples with the following
         keys: 'uuid', 'image', 'timestamp', 'processed', 'no_grountruth', 'annotations'
@@ -281,10 +282,10 @@ class SeerepEndpoint:
         else:
             logger.error("Modality not supported. Please use image or pointcloud")
             sys.exit(0)
-    
+
     def process_images(self, buffer, model_name, num_samples:int=None)->dict:
         '''
-        buffer: flatbuffer buffer containing the query message 
+        buffer: flatbuffer buffer containing the query message
         generated using the SEEREP createQuery function
         model_name: name of the model for which the predictions are to be generated.
         num_samples: [DEBUG ONLY] number of samples to fetch from the SEEREP server.
@@ -296,7 +297,7 @@ class SeerepEndpoint:
         # Limit the generator if num_samples is provided
         # if num_samples is not None:
         #     data_generator = itertools.islice(data_generator, 100, 100+num_samples)
-        
+
         # Set tqdm total only if num_samples is provided
         tqdm_kwargs = {
             "desc": "Fetching images from the SEEREP server",
@@ -355,10 +356,10 @@ class SeerepEndpoint:
             sample = {}  # flush the sample data for new incoming samples
         logger.info('Fetched {} images from the current SEEREP project'.format(len(data)))
         return data
-    
+
     def process_pointclouds(self, buffer, model_name, num_samples:int=10)->dict:
         '''
-        buffer: flatbuffer buffer containing the query message 
+        buffer: flatbuffer buffer containing the query message
         generated using the SEEREP createQuery function
         model_name: name of the model for which the predictions are to be generated.
         Returns a list of dictionaries containing the data samples with the following keys:
@@ -414,7 +415,7 @@ class SeerepEndpoint:
                     logger.error(e)
                     continue
                 fields[response.Fields(j).Name().decode('utf-8')]['data_string'] = c
-                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c) 
+                fields[response.Fields(j).Name().decode('utf-8')]['size'] = struct.calcsize(c)
             for field in fields:
                 strs = list()
                 for i in range(fields[field]['offset'], raw_data.shape[0], response.PointStep()):      # Each chunk size must have one entry for each field i.e. x,y,z,intensity, t, reflectivity, ring, ambient, range
@@ -422,7 +423,7 @@ class SeerepEndpoint:
                     strs.append(sb)
                 fields[field]['data'] = (np.array(strs, dtype=np.object_))
                 strs = []
-            sample['pointcloud'] = copy(fields) 
+            sample['pointcloud'] = copy(fields)
             if 'reflectivity' in fields:
                 sample['lidar_feature'] = 'reflectivity'
             else:
@@ -433,7 +434,7 @@ class SeerepEndpoint:
                 pc[:, 1] = fields['y']['data'][:, 0]
                 pc[:, 2] = fields['z']['data'][:, 0]
                 self.visualizer.draw_scenes(points=pc)
-                
+
             # TODO Fetch the labels for pointclouds from SEEREP server
             # labels: Set[Tuple[str, int]] = set()
             # for label_idx in range(response.LabelsLength()):    # Here LabelsLength correspond to number of categories
@@ -461,17 +462,17 @@ class SeerepEndpoint:
                 sample['no_grountruth'] = True
             data.append(sample.copy())
             # flush the sample data for new incoming samples
-            sample={}    
+            sample={}
         logger.info('Fetched {} pointclouds from the current SEEREP project'.format(len(data)))
-        # TODO Does the parent frame change a lot to be dynamic? 
+        # TODO Does the parent frame change a lot to be dynamic?
         data = self.run_query_tf(data, parent_frame='base_link')
         data = self.preprocess_pc(data, model_name=model_name, num_samples=num_samples)
         return data
-    
+
     @staticmethod
     def get_data_type_character(dtype):
         """
-        # https://docs.python.org/2/library/struct.html          
+        # https://docs.python.org/2/library/struct.html
         Returns the struct format character for a given numpy data type using a lookup table.
         Args:
             dtype: Numpy data type (e.g., np.int16, np.uint16, etc.)
@@ -495,7 +496,7 @@ class SeerepEndpoint:
             raise ValueError(f"Invalid data type: {dtype}")
 
         return c
-    
+
     def fetch_uuids_by_project_uuid(self, project_uuid: list[str])->list[str]:
         if isinstance(project_uuid, str):
             projectUuids = [project_uuid]
@@ -514,10 +515,10 @@ class SeerepEndpoint:
         self._builder.Finish(queryMsg)
         buffer = self._builder.Output()
         return self.process_uuids(buffer)
-    
-    def fetch_data_by_project(self, 
-                              project_uuids: list[str], 
-                              model_name: str, 
+
+    def fetch_data_by_project(self,
+                              project_uuids: list[str],
+                              model_name: str,
                               num_samples:int=None,
                               modality: str='image')->dict:
         '''
@@ -570,10 +571,10 @@ class SeerepEndpoint:
             anns_dict[idx+1] = id
 
         return anns_dict
-        
+
     def process_uuids(self, buffer)->list[str]:
         '''
-        buffer: flatbuffer buffer containing the query message 
+        buffer: flatbuffer buffer containing the query message
         generated using the SEEREP createQuery function
         model_name: name of the model for which the predictions are to be generated.
         Returns a list of string containing the UUIDs of the data samples
@@ -594,7 +595,7 @@ class SeerepEndpoint:
             data.append(sample_uuid)
         logger.info('Fetched {} UUIDs from the current SEEREP project'.format(len(data)))
         return data
-    
+
     def preprocess_pc(self, pointcloud_data: dict, model_name: list, num_samples:int=10) -> dict:
         """
         Processing Steps:
@@ -618,8 +619,8 @@ class SeerepEndpoint:
         if 'kitti' in model_name[0]:
             dataset_translation = [0.0, 0.0, -1.026558971]
         # TODO add nuscenes translation
-        elif 'nuscenes' in model_name[0]: 
-            dataset_translation = [0.0, 0.0, -1.026558971]  
+        elif 'nuscenes' in model_name[0]:
+            dataset_translation = [0.0, 0.0, -1.026558971]
         else:
             logger.error(f"Dataset {model_name[0]} not supported. Please use kitti or nuscenes.")
             return None
@@ -635,7 +636,7 @@ class SeerepEndpoint:
             else:
                 logger.error(f"Sample {sample['uuid']} does not have a tf. Skipping...")
                 continue
-            
+
             MAX_FEATURE_VALUE = 255
             # sensor and data specific params
             sensor_to_robot_base_transform = o3d.core.Tensor(
@@ -657,9 +658,9 @@ class SeerepEndpoint:
             )
             preprocessed_np_pcd[:, 3] /= MAX_FEATURE_VALUE
             pointcloud_data[pointcloud_data.index(sample)]['pointcloud_processed'] = preprocessed_np_pcd
-            
+
         return pointcloud_data
-    
+
     def run_query_tf_frames(self, target_proj_uuid: str = None, grpc_channel: Channel = get_gRPC_channel()
                             )-> dict:
         """
@@ -679,7 +680,7 @@ class SeerepEndpoint:
         frameQuery = FrameQuery.End(builder)
         builder.Finish(frameQuery)
         buf = builder.Output()
-        
+
         responseBuf = stub.GetFrames(bytes(buf))
         response = StringVector.StringVector.GetRootAs(responseBuf)
         for idx in range(response.StringVectorLength()):
@@ -689,8 +690,8 @@ class SeerepEndpoint:
             except yaml.YAMLError as e:
                 logger.error(f"Error parsing frame string as YAML: {e}")
         return frame_dict
-    
-    def run_query_tf(self, 
+
+    def run_query_tf(self,
                      data: list[dict],
                      parent_frame: str='base_link',) -> list[dict]:
         """
@@ -707,7 +708,7 @@ class SeerepEndpoint:
                             colour='BLUE',
                             desc='Query TF for each pointcloud',
                             unit=" samples"):
-            
+
             timestamp = createTimeStamp(builder, sample['timestamp'][0], sample['timestamp'][1])    # [0] is seconds, [1] is nanoseconds
             header = createHeader(
                 builder=builder,
@@ -719,7 +720,7 @@ class SeerepEndpoint:
             if parent_frame in frames:
                 tf_query = createTransformStampedQuery(
                     builder=builder,
-                    header=header,  
+                    header=header,
                     childFrameId=sample['sensor_name'],  # Child frame ID should be the sensor name sample['sensor_name']
                 )
             else:
@@ -747,7 +748,7 @@ class SeerepEndpoint:
                 logger.error(f"Error querying TF for pointcloud {sample['uuid']}: {e}")
                 data[index]['tf'] = None
         return data
-    
+
     # TODO run query will be deprecated. Out of date.
     def run_query_images(self, model_name='None'):
         projectUuids = [self._projectid]
@@ -814,19 +815,19 @@ class SeerepEndpoint:
         if self.vis:
             cv2.destroyWindow(self.source_window)
         return data
-    
+
     # TODO Send dataset should also be on project or data UUID basis. Out of date.
-    def send_dataset(self, 
-                     data: list[dict], 
-                     uuids: list[str], 
-                     category: str='yolov5m_coco', 
+    def send_dataset(self,
+                     data: list[dict],
+                     uuids: list[str],
+                     category: str='yolov5m_coco',
                      ignore_ground_truth: bool=False):
         """
             Send the previously fetched SEEREP dataset augmented with Datumaro annotations
             using model from triton server under the name category. If ignore_ground_truth is set to True,
             then the predictions will be sent as ground truth annotations. If set to False, then the
             predictions will be sent only if there are ground truth annotations present in the data sample.
-            
+
             Args:
                 data (list[dict]): List of dictionaries containing the data samples with ['annotations']
                 uuids (list[str]): List of UUIDs of the data samples
@@ -837,6 +838,9 @@ class SeerepEndpoint:
             Returns:
                 str: The UUID of the created SEEREP project.
             """
+        logger.info("Data for modality")
+        logger.info(self.modality)
+        logger.info(data)
         data_stub, _, builder = self.secondary_channel()
         query = util_fb.createQuery(
                             builder,
@@ -855,7 +859,7 @@ class SeerepEndpoint:
             sys.exit(0)
         if not response_ls:
             logger.error("""
-                No samples found. Check if the provided UUIDs in the createQuery are correct. 
+                No samples found. Check if the provided UUIDs in the createQuery are correct.
             """)
             sys.exit()
         msgToSend = []
@@ -866,13 +870,19 @@ class SeerepEndpoint:
                                 desc="Sending Predictions to SEEREP Server:",
                                 unit="predictions"
                                 ):
-            response = Image.Image.GetRootAs(responseBuf)
+            if self.modality == 'image':
+                response = Image.Image.GetRootAs(responseBuf)
+            elif self.modality == 'pointcloud':
+                response =  PointCloud2.PointCloud2.GetRootAs(responseBuf)
+            else:
+                logger.error("Cannot create a response buffer for target modality: {}".format(self.modality))
+                sys.exit(0)
             # Fetch the image UUID from the response that we have already previously fetched for inference
-            img_uuid = response.Header().UuidMsgs().decode("utf-8")
+            data_uuid = response.Header().UuidMsgs().decode("utf-8")
             labels = []
-            # Match the image UUID with the data sample which were inferenced from previous fetch. 
-            anns = [sample for sample in data if sample['uuid']==img_uuid][0]
-            # This ignore_ground_truth flag is only to be used to send dummy predictions to SEEREP server as ground truth annotations. 
+            # Match the image UUID with the data sample which were inferenced from previous fetch.
+            anns = [sample for sample in data if sample['uuid']==data_uuid][0]
+            # This ignore_ground_truth flag is only to be used to send dummy predictions to SEEREP server as ground truth annotations.
             # DEBUG_ONLY
             if ignore_ground_truth:
                 logger.warning("Model predictions will be sent as Ground truth since ignore_ground_truth is set to True")
@@ -881,7 +891,7 @@ class SeerepEndpoint:
                         labels.append(create_label(builder=builder,
                                                     label='person',
                                                     label_id=int(prediction['label_id']),
-                                                    instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                    instance_uuid=str(data_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
                                                     instance_id=int(prediction['id'])
                                                     ))
                     labelsCategory = []
@@ -889,31 +899,33 @@ class SeerepEndpoint:
                                                 builder=builder,
                                                 labels=labels,
                                                 datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
-                                                category=category)) 
+                                                category=category))
                     dataset_uuid_label = create_dataset_uuid_label(builder=builder,
                                                                     projectUuid=anns['project_uuid'],
-                                                                    datasetUuid=img_uuid,
+                                                                    datasetUuid=data_uuid,
                                                                     labels=labelsCategory)
                     builder.Finish(dataset_uuid_label)
                     buf = builder.Output()
-                    label_list.append((img_uuid,buf))
+                    label_list.append((data_uuid,buf))
                     msgToSend.append(bytes(buf))
                 # Ground truth found but no predictions were generated by the model aka 'category'
                 else:
-                    logger.info("Skipping image with UUID: {} since no predictions were generated by the current model {}".format(img_uuid, category))
+                    logger.info("Skipping image with UUID: {} since no predictions were generated by the current model {}".format(data_uuid, category))
             else:
                 # Predicted and sent to SEEREP already from a previous run --> DONT SEND TO SEEREP
                 if category in anns['processed']:
-                    logger.info("Skipping image with UUID: {}. Already processed by Model: {} from previous requests".format(img_uuid, category))
+                    logger.info("Skipping image with UUID: {}. Already processed by Model: {} from previous requests".format(data_uuid, category))
                     pass
                 # Not predicted and not sent to SEEREP --> SEND DATA TO SEEREP
                 else:
+                    logger.info("Annotations")
+                    logger.info(anns['annotations']['items'][-1]['annotations'])
                     if len(anns['annotations']['items'][-1]['annotations']) > 0:
                         for prediction in anns['annotations']['items'][-1]['annotations']:  #last added item is new prediction. TODO double check!
                             labels.append(create_label(builder=builder,
                                                         label='person',
                                                         label_id=int(prediction['label_id']),
-                                                        instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                        instance_uuid=str(data_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
                                                         instance_id=int(prediction['id'])
                                                         ))
                         labelsCategory = []
@@ -921,21 +933,21 @@ class SeerepEndpoint:
                                                     builder=builder,
                                                     labels=labels,
                                                     datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
-                                                    category=category)) 
+                                                    category=category))
                         dataset_uuid_label = create_dataset_uuid_label(builder=builder,
                                                                         projectUuid=anns['project_uuid'],
-                                                                        datasetUuid=img_uuid,
+                                                                        datasetUuid=data_uuid,
                                                                         labels=labelsCategory)
                         builder.Finish(dataset_uuid_label)
                         buf = builder.Output()
-                        label_list.append((img_uuid,buf))
+                        label_list.append((data_uuid,buf))
                         msgToSend.append(bytes(buf))
                     else:
-                        logger.info("Generating dummy predictions since nothing detected by the current model {}".format(img_uuid, category))
+                        logger.info("Generating dummy predictions since nothing detected by the current model {}".format(data_uuid, category))
                         labels.append(create_label(builder=builder,
                                                         label='person',
                                                         label_id=int(1000),
-                                                        instance_uuid=str(img_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
+                                                        instance_uuid=str(data_uuid),        # TODO The instance uuid and id are optional. keeping it to dummy values to not break things
                                                         instance_id=int(1000),
                                                         ))
                         labelsCategory = []
@@ -943,14 +955,14 @@ class SeerepEndpoint:
                                                     builder=builder,
                                                     labels=labels,
                                                     datumaro_json=json.dumps(anns['annotations']['items'][-1]), # must be json encoded string not a regular string
-                                                    category=category)) 
+                                                    category=category))
                         dataset_uuid_label = create_dataset_uuid_label(builder=builder,
                                                                         projectUuid=anns['project_uuid'],
-                                                                        datasetUuid=img_uuid,
+                                                                        datasetUuid=data_uuid,
                                                                         labels=labelsCategory)
                         builder.Finish(dataset_uuid_label)
                         buf = builder.Output()
-                        label_list.append((img_uuid,buf))
+                        label_list.append((data_uuid,buf))
                         msgToSend.append(bytes(buf))
         try:
             if len(msgToSend) != 0:
@@ -972,12 +984,12 @@ def main():
             visualize=True,
         )
     project_uuid = seerep_channel.get_project_uuid(project_name)
-    data = seerep_channel.fetch_data_by_project([project_uuid], 
+    data = seerep_channel.fetch_data_by_project([project_uuid],
                                                 model_name=model_name)
     uuids = seerep_channel.fetch_uuids_by_project_uuid([project_uuid])
-    data = seerep_channel.fetch_data_by_sample(uuids, 
+    data = seerep_channel.fetch_data_by_sample(uuids,
                                                 model_name=model_name)
     print('uuids')
-        
+
 if __name__ == "__main__":
     main()
