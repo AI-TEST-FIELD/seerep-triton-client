@@ -452,29 +452,31 @@ class TritonInference:
                 }
                 # perform inference on each image, iteratively
                 t3 = time.time()
-                pred = infer_function(sample[data_key], model_key=model_key)
-                t4 = time.time()
-                infer_array[seerep_sample_idx] = t4 - t3
-                # traverse the predictions for the current image
-                predictions['annotations'] = datumaro_converter(sample=sample,
-                                                                model_output=pred,
-                                                                sample_idx=seerep_sample_idx,
-                                                                visualize=self.visualize,
-                                                                class_names=self.models[model_key].class_names,
-                                                                model_name=self.models[model_key].model_name)
-                data[seerep_sample_idx]['annotations']['items'].append(predictions)
+                if data_key in sample:
+                    # TODO: Add error if data was skipped caused by eg. missing tf
+                    pred = infer_function(sample[data_key], model_key=model_key)
+                    t4 = time.time()
+                    infer_array[seerep_sample_idx] = t4 - t3
+                    # traverse the predictions for the current image
+                    predictions['annotations'] = datumaro_converter(sample=sample,
+                                                                    model_output=pred,
+                                                                    sample_idx=seerep_sample_idx,
+                                                                    visualize=self.visualize,
+                                                                    class_names=self.models[model_key].class_names,
+                                                                    model_name=self.models[model_key].model_name)
+                    data[seerep_sample_idx]['annotations']['items'].append(predictions)
                 # Visualize the groundtruth annotations on the same image as predictions
                 # if True:
             #     if self.visualize:
-            #         visualize(sample, 
-            #                 self.models[model_key].model_name, 
+            #         visualize(sample,
+            #                 self.models[model_key].model_name,
             #                 self.models[model_key].class_names,
             #                 # new_model_key=False,
             #                 # model_name=self.models[model_key].model_name,
             #                 save=True
             #                 )
             # if self.visualize:
-            #     cv2.destroyWindow(self.winname) 
+            #     cv2.destroyWindow(self.winname)
             logger.info('Processed all inference requests in current data subset!')
         return data
 
