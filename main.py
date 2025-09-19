@@ -27,10 +27,10 @@ example_project_uuid = ['2918b2dd-0bc9-40d5-bf94-0a60ff0f1b3a']
 # example_uuids = ['7ffc1491-b083-4929-b70a-b2e1c45e49ba',
 #            'c0cb19f2-1a02-4d90-85e0-9a900b8a0f46']
 model_names = [
-    'pointrcnn_iou_kitti',
     'parta2_free_kitti', 
     'second_iou_kitti',
-    'pointpillar_kitti',
+    # 'pointpillar_kitti',
+    # 'pointrcnn_iou_kitti',
     ]
 # model_names = ['second_iou_kitti']
 
@@ -59,11 +59,11 @@ data = triton_client.seerep_endpoint.fetch_data_by_project(
                                                         modality='pointcloud'
                                                         )
 data_uuids = [sample['uuid'] for sample in data]
-batch_size = 100
-for batch in range(0, len(data_uuids), batch_size):
-    for model_name in model_names:
+batch_size = 10
+for model_name in model_names:
+    for batch in range(0, len(data_uuids), batch_size):
         logger.info("Generating annotations for model: %s", model_name)
-        data = triton_client.generate_datumaro_predictions(data[batch:batch + batch_size], model_key=model_name)
+        triton_client.generate_datumaro_predictions(data[batch:batch + batch_size], model_key=model_name)
         # triton_client.seerep_endpoint.send_dataset(
         #                                     uuids=data_uuids[batch:batch + batch_size],
         #                                     data=data,

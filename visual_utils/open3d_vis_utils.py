@@ -64,17 +64,35 @@ class Visualizer:
 
     def _set_ego_camera_view(self, eye=None, lookat=None, up=None):
         ctr = self.vis.get_view_control()
-        eye = np.array([-5.0, 0.0, 5.0], dtype=np.float64) if eye is None else np.asarray(eye, dtype=np.float64)
+        eye = np.array([-20.0, 0.0, 7.0], dtype=np.float64) if eye is None else np.asarray(eye, dtype=np.float64)
         lookat = np.array([0.0, 0.0, 0.0], dtype=np.float64) if lookat is None else np.asarray(lookat, dtype=np.float64)
         up = np.array([0.0, 0.0, 1.0], dtype=np.float64) if up is None else np.asarray(up, dtype=np.float64)
 
-        forward = lookat - eye
-        forward /= (np.linalg.norm(forward) + 1e-12)
-        right = np.cross(forward, up)
-        right /= (np.linalg.norm(right) + 1e-12)
-        true_up = np.cross(right, forward)
-
-        R = np.stack([right, true_up, -forward], axis=0)
+        # Calculate view direction (from eye to lookat)
+        view_direction = lookat - eye
+        view_direction /= (np.linalg.norm(view_direction) + 1e-12)
+        
+        # For your coordinate system (+X forward, +Y left, +Z up):
+        # Camera should look along +view_direction, but Open3D camera looks along -Z
+        # So we need to align +view_direction with -camera_z
+        
+        # Calculate camera right vector (should align with -Y in your system since +Y is left)
+        camera_right = np.cross(view_direction, up)
+        camera_right /= (np.linalg.norm(camera_right) + 1e-12)
+        
+        # Calculate camera up vector
+        camera_up = np.cross(camera_right, view_direction)
+        camera_up /= (np.linalg.norm(camera_up) + 1e-12)
+        camera_up = -camera_up  # Invert to align with +Z up in your system
+        
+        # Open3D camera coordinate system: X=right, Y=up, Z=-forward
+        # So camera_z should be -view_direction
+        camera_z = view_direction
+        
+        # Build rotation matrix: [right, up, -forward] (Open3D convention)
+        R = np.stack([camera_right, camera_up, camera_z], axis=0)
+        
+        # Translation
         t = -R @ eye
 
         extrinsic = np.eye(4, dtype=np.float64)
@@ -167,6 +185,7 @@ class Visualizer:
         if ref_boxes is not None:
             self.draw_box(ref_boxes, (0, 1, 0), ref_labels, ref_scores)
 
+        self._set_ego_camera_view()
         # Do NOT reset camera here; let the user control it
         # Block until ESC/Space pressed
         self._wait_for_key()
