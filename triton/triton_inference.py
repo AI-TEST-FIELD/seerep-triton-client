@@ -330,8 +330,8 @@ class TritonInference:
     def triton_infer_pointcloud(self,
                                 pointcloud:np.ndarray,
                                 model_key: str,
-                                confidence_threshold: float=0.4,
-                                class_idx: int=1)->list[np.ndarray]:
+                                confidence_threshold: float=0.2,
+                                class_idx: int=2)->list[np.ndarray]:
         """
         Perform inference on the point cloud data.
         :param sample: Point cloud data
@@ -465,16 +465,16 @@ class TritonInference:
                 data[seerep_sample_idx]['annotations']['items'].append(predictions)
                 # Visualize the groundtruth annotations on the same image as predictions
                 # if True:
-                if self.visualize:
-                    visualize(sample,
-                            self.models[model_key].model_name,
-                            self.models[model_key].class_names,
-                            # new_model_key=False,
-                            # model_name=self.models[model_key].model_name,
-                            save=True
-                            )
-            if self.visualize:
-                cv2.destroyWindow(self.winname)
+            #     if self.visualize:
+            #         visualize(sample, 
+            #                 self.models[model_key].model_name, 
+            #                 self.models[model_key].class_names,
+            #                 # new_model_key=False,
+            #                 # model_name=self.models[model_key].model_name,
+            #                 save=True
+            #                 )
+            # if self.visualize:
+            #     cv2.destroyWindow(self.winname) 
             logger.info('Processed all inference requests in current data subset!')
         return data
 

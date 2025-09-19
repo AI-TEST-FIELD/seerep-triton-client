@@ -240,8 +240,7 @@ class EvaluateInference:
                 total=len(data),
                 colour="GREEN",
                 desc="Sending inference request to Triton",
-                unit="requests",
-                ascii=True,
+                unit="requests"
             ):
                 if False:
                     self.processed_counter += 1
@@ -269,18 +268,17 @@ class EvaluateInference:
                 # Visualize the groundtruth annotations on the same image as predictions
                 if self.visualize:
                     visualize(sample, 
-                                            'self.winname', 
-                                            self.class_names,
-                                            new_model_key=False,
-                                            model_name=None
-                                            )
+                            'self.winname', 
+                            self.class_names,
+                            new_model_key=False,
+                            model_name=None
+                            )
             if self.visualize:
                 cv2.destroyWindow(self.winname) 
             logger.info('Processed all inference requests in current data subset!')
             logger.info('{} were skipped since predictions were already stored from previous runs'.format(self.processed_counter))
             logger.info('{} image had no ground truth associated with them.'.format(self.no_gt_counter))
         return data
-
 
     def seerep_infer_pc(self, sample: np.array, 
                         confidence_threshold=0.4, 
@@ -352,7 +350,7 @@ class EvaluateInference:
                 ref_labels=labels[indices],
             )
 
-    def process_pc(self, data, seerep_channel: seerep_channel.SEEREPChannel):
+    def process_pc(self, data, seerep_channel: SeerepEndpoint):
         # traverse through the samples
         infer_array = np.zeros(len(data), dtype=np.float16)
         for sample, idx in tqdm(
@@ -401,3 +399,11 @@ class EvaluateInference:
             data = seerep_channel.process_images(buffer, model_name)
             # Send predictions back to SEEREP for future use
             # seerep_channel.send_dataset(data, category=self.model_name)
+        elif modality == "pointclouds":
+            project_uuid = seerep_channel.get_project_uuid('map', log=True)
+            buffer = seerep_channel.fetch_data_by_sample_uuid(['45c2789d-0331-4cfe-870d-d3f7e5792e1d',
+                                                        'b82b6c44-76aa-47f7-8ac6-79895e484d98'], 
+                                                        model_name=self.model_name)
+            # uuids = seerep_channel.fetch_uuids_by_project_uuid([project_uuid])
+            # data = seerep_channel.fetch_data_by_sample_uuid(uuids, model_name=self.model_name)
+            print('hold')
